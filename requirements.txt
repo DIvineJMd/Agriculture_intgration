@@ -1,0 +1,11 @@
+pandas
+spacy
+fuzzywuzzy
+selenium
+webdriver-manager==3.0.0
+requests
+geopy
+openmeteo-requests
+requests-cache 
+retry-requests 
+numpy
