@@ -1,7 +1,9 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+from dashboard import html_temp
 
-def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
+def host_db(username, password, host, port, db_name, db_type='sqlite'):
     """
     Hosts a database and exposes it as an API.
 
@@ -27,6 +29,12 @@ def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
     
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db = SQLAlchemy(app)
+    
+    # Activity log to store connection events
+    connection_activity_log = []
+
+    # HTML template for displaying database info and activity log
+    dashboard_template = html_temp
 
     # Define a sample database model (this can be extended)
     class User(db.Model):
@@ -37,16 +45,31 @@ def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
         def to_dict(self):
             return {"id": self.id, "name": self.name, "email": self.email}
 
-    # Initialize the database
-    @app.before_first_request
-    def initialize_database():
+    # Initialize the database (workaround for before_first_request)
+    with app.app_context():
         db.create_all()
+        connection_activity_log.append({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "message": "Database initialized."
+        })
+
+    # Dashboard route
+    @app.route('/dashboard')
+    def dashboard():
+        """Displays the dashboard with database info and connection activity."""
+        return render_template_string(dashboard_template, 
+                                      db_name=db_name, 
+                                      connection_activity=connection_activity_log)
 
     # API endpoints
     @app.route('/users', methods=['GET'])
     def get_users():
         """Fetch all users."""
         users = User.query.all()
+        connection_activity_log.append({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "message": "Fetched all users."
+        })
         return jsonify([user.to_dict() for user in users])
 
     @app.route('/users', methods=['POST'])
@@ -59,9 +82,17 @@ def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
             new_user = User(name=data['name'], email=data['email'])
             db.session.add(new_user)
             db.session.commit()
+            connection_activity_log.append({
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "message": f"Added new user: {data['name']}."
+            })
             return jsonify(new_user.to_dict()), 201
         except Exception as e:
             db.session.rollback()
+            connection_activity_log.append({
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "message": f"Error adding user: {str(e)}."
+            })
             return jsonify({"error": str(e)}), 500
 
     @app.route('/users/<int:user_id>', methods=['GET'])
@@ -70,6 +101,10 @@ def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
+        connection_activity_log.append({
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "message": f"Fetched user with ID: {user_id}."
+        })
         return jsonify(user.to_dict())
 
     @app.route('/users/<int:user_id>', methods=['DELETE'])
@@ -81,22 +116,17 @@ def host_db(username, password, host, port, db_name, db_type = 'sqlite'):
         try:
             db.session.delete(user)
             db.session.commit()
+            connection_activity_log.append({
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "message": f"Deleted user with ID: {user_id}."
+            })
             return jsonify({"message": "User deleted successfully"}), 200
         except Exception as e:
             db.session.rollback()
+            connection_activity_log.append({
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "message": f"Error deleting user: {str(e)}."
+            })
             return jsonify({"error": str(e)}), 500
 
     return app
-
-# Example Usage
-if __name__ == '__main__':
-    # Hosting a SQLite database and exposing it via an API
-    app = host_db(
-        # db_type='sqlite',       # Use 'mysql', 'postgresql' for other databases
-        username='',            # Not required for SQLite
-        password='',            # Not required for SQLite
-        host='',                # Not required for SQLite
-        port=0,                 # Not required for SQLite
-        db_name='example_db'    # SQLite database file name
-    )
-    app.run(host='0.0.0.0', port=5000)
