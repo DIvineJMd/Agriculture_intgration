@@ -40,36 +40,50 @@ def load_irrigated_area():
     
     return df
 
-def create_database():
-    """Create SQLite database and load data"""
+def create_databases():
+    """Create separate SQLite databases for crop prices and irrigated area"""
     # Create database directory if it doesn't exist
     os.makedirs('database', exist_ok=True)
     
-    # Update connection path to use database folder
-    conn = sqlite3.connect('database/Irrigated_Area_and_Crop_Price.db')
-    
+    # Create crop prices database
+    crop_prices_conn = sqlite3.connect('database/crop_prices.db')
     try:
-        # Load dataframes
+        # Load crop prices data
         crop_prices_df = load_crop_prices()
+        
+        # Save to database
+        crop_prices_df.to_sql('crop_prices', crop_prices_conn, if_exists='replace', index=False)
+        
+        # Create indexes for better query performance
+        crop_prices_conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_date ON crop_prices(Arrival_Date)')
+        crop_prices_conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_state ON crop_prices(State)')
+        
+        print("Crop prices database created successfully!")
+        
+    except Exception as e:
+        print(f"Error creating crop prices database: {str(e)}")
+    finally:
+        crop_prices_conn.close()
+    
+    # Create irrigated area database
+    irrigated_area_conn = sqlite3.connect('database/irrigated_area.db')
+    try:
+        # Load irrigated area data
         irrigated_area_df = load_irrigated_area()
         
         # Save to database
-        crop_prices_df.to_sql('crop_prices', conn, if_exists='replace', index=False)
-        irrigated_area_df.to_sql('irrigated_area', conn, if_exists='replace', index=False)
+        irrigated_area_df.to_sql('irrigated_area', irrigated_area_conn, if_exists='replace', index=False)
         
         # Create indexes for better query performance
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_date ON crop_prices(Arrival_Date)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_year ON irrigated_area(Year)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_state ON crop_prices(State)')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_state ON irrigated_area(State_Name)')
+        irrigated_area_conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_year ON irrigated_area(Year)')
+        irrigated_area_conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_state ON irrigated_area(State_Name)')
         
-        print("Database created successfully!")
+        print("Irrigated area database created successfully!")
         
     except Exception as e:
-        print(f"Error creating database: {str(e)}")
-        
+        print(f"Error creating irrigated area database: {str(e)}")
     finally:
-        conn.close()
+        irrigated_area_conn.close()
 
 if __name__ == "__main__":
-    create_database()
+    create_databases()

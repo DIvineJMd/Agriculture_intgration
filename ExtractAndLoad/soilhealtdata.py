@@ -122,8 +122,8 @@ def setup_driver(download_dir):
         logger.error(f"Failed to initialize WebDriver: {str(e)}")
         raise
 
-def create_database():
-    """Create SQLite database and tables if they don't exist"""
+def create_databases():
+    """Create separate SQLite databases for macro and micro nutrients"""
     try:
         # Create database directory if it doesn't exist
         db_path = os.path.join(os.getcwd(), 'database')
@@ -131,11 +131,11 @@ def create_database():
             os.makedirs(db_path)
             logger.info("Created database directory")
         
-        conn = sqlite3.connect('database/soil_health.db')
-        cursor = conn.cursor()
+        # Create macro nutrients database
+        macro_conn = sqlite3.connect('database/macro_nutrients.db')
+        macro_cursor = macro_conn.cursor()
         
-        # Create macro nutrients table
-        cursor.execute('''
+        macro_cursor.execute('''
             CREATE TABLE IF NOT EXISTS macro_nutrients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 block TEXT,
@@ -161,9 +161,13 @@ def create_database():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        macro_conn.commit()
         
-        # Create micro nutrients table
-        cursor.execute('''
+        # Create micro nutrients database
+        micro_conn = sqlite3.connect('database/micro_nutrients.db')
+        micro_cursor = micro_conn.cursor()
+        
+        micro_cursor.execute('''
             CREATE TABLE IF NOT EXISTS micro_nutrients (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 block TEXT,
@@ -184,62 +188,86 @@ def create_database():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        micro_conn.commit()
         
-        conn.commit()
-        logger.info("Database and tables created/verified successfully")
-        return conn
+        logger.info("Databases and tables created/verified successfully")
+        return macro_conn, micro_conn
     except Exception as e:
-        logger.error(f"Error creating database: {str(e)}")
+        logger.error(f"Error creating databases: {str(e)}")
         raise
 
 def store_csv_to_database(csv_path, state, district):
-    """Store CSV data in SQLite database"""
+    """Store CSV data in appropriate SQLite database"""
     try:
         # Read CSV file
         df = pd.read_csv(csv_path)
         
-        # Connect to database
-        conn = create_database()
-        cursor = conn.cursor()
+        # Debug logging to check the data being processed
+        logger.info(f"Processing file: {csv_path}")
+        logger.info(f"DataFrame columns: {df.columns.tolist()}")
         
         # Determine if this is macro or micro data based on filename
         is_macro = "macro" in csv_path.lower()
-        table_name = "macro_nutrients" if is_macro else "micro_nutrients"
+        logger.info(f"Is macro data: {is_macro}")
+        
+        # Connect to appropriate database
+        db_name = "macro_nutrients.db" if is_macro else "micro_nutrients.db"
+        conn = sqlite3.connect(f'database/{db_name}')
+        cursor = conn.cursor()
+        
+        # Debug logging for database connection
+        logger.info(f"Connected to database: {db_name}")
         
         # Process each row in the DataFrame
-        for _, row in df.iterrows():
+        for index, row in df.iterrows():
+            # Debug first row
+            if index == 0:
+                logger.info(f"Sample row data: {row.to_dict()}")
+            
             # Remove the % symbol and convert to float
             values = [float(str(v).replace('%', '')) / 100 if isinstance(v, str) and '%' in str(v) else v 
                      for v in row.values[1:]]  # Skip the 'Block' column
             
             if is_macro:
-                cursor.execute('''
-                    INSERT INTO macro_nutrients (
-                        block, nitrogen_high, nitrogen_medium, nitrogen_low,
-                        phosphorous_high, phosphorous_medium, phosphorous_low,
-                        potassium_high, potassium_medium, potassium_low,
-                        oc_high, oc_medium, oc_low,
-                        ec_saline, ec_non_saline,
-                        ph_acidic, ph_neutral, ph_alkaline,
-                        state, district
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (row['Block'], *values, state, district))
+                try:
+                    cursor.execute('''
+                        INSERT INTO macro_nutrients (
+                            block, nitrogen_high, nitrogen_medium, nitrogen_low,
+                            phosphorous_high, phosphorous_medium, phosphorous_low,
+                            potassium_high, potassium_medium, potassium_low,
+                            oc_high, oc_medium, oc_low,
+                            ec_saline, ec_non_saline,
+                            ph_acidic, ph_neutral, ph_alkaline,
+                            state, district
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (row['Block'], *values, state, district))
+                    if index == 0:
+                        logger.info("Successfully inserted first macro row")
+                except Exception as e:
+                    logger.error(f"Error inserting macro row {index}: {str(e)}")
+                    logger.error(f"Values being inserted: {[row['Block'], *values, state, district]}")
             else:
-                cursor.execute('''
-                    INSERT INTO micro_nutrients (
-                        block, copper_sufficient, copper_deficient,
-                        boron_sufficient, boron_deficient,
-                        sulphur_sufficient, sulphur_deficient,
-                        iron_sufficient, iron_deficient,
-                        zinc_sufficient, zinc_deficient,
-                        manganese_sufficient, manganese_deficient,
-                        state, district
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (row['Block'], *values, state, district))
+                try:
+                    cursor.execute('''
+                        INSERT INTO micro_nutrients (
+                            block, copper_sufficient, copper_deficient,
+                            boron_sufficient, boron_deficient,
+                            sulphur_sufficient, sulphur_deficient,
+                            iron_sufficient, iron_deficient,
+                            zinc_sufficient, zinc_deficient,
+                            manganese_sufficient, manganese_deficient,
+                            state, district
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (row['Block'], *values, state, district))
+                    if index == 0:
+                        logger.info("Successfully inserted first micro row")
+                except Exception as e:
+                    logger.error(f"Error inserting micro row {index}: {str(e)}")
+                    logger.error(f"Values being inserted: {[row['Block'], *values, state, district]}")
         
         conn.commit()
         conn.close()
-        logger.info(f"Successfully stored data for {len(df)} blocks in {table_name}")
+        logger.info(f"Successfully stored data for {len(df)} blocks in {db_name}")
         return True
         
     except Exception as e:
@@ -370,11 +398,16 @@ def download_soil_health_data(state="ANDHRA PRADESH", district="ANANTAPUR", down
 
 if __name__ == "__main__":
     try:
-        # Create a temporary download directory instead of using the database directory
+        # Create databases first
+        macro_conn, micro_conn = create_databases()
+        macro_conn.close()
+        micro_conn.close()
+        
+        # Create a temporary download directory
         download_dir = os.path.join(os.getcwd(), "temp_downloads")
         success = download_soil_health_data(download_dir=download_dir)
         
-        # Clean up temporary download directory after successful execution
+        # Clean up temporary download directory
         if os.path.exists(download_dir):
             try:
                 for file in os.listdir(download_dir):
@@ -389,5 +422,5 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     except Exception as e:
         logger.error(f"Script failed: {str(e)}")
-        sys.exit(1)\
+        sys.exit(1)
             
