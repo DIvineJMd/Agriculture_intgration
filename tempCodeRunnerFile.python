@@ -1,113 +1,20 @@
-import sqlite3
-import pandas as pd
-import numpy as np
+from openai import OpenAI
 
-def load_transformed_data():
-    """Load both transformed soil health and fertilizer data"""
-    soil_conn = sqlite3.connect('Transformed_database/soil_health_transformed.db')
-    fert_conn = sqlite3.connect('Transformed_database/fertilizer_recommendation.db')
-    
-    soil_df = pd.read_sql_query("""
-        SELECT 
-            block, state, district,
-            nitrogen_level, phosphorous_level, potassium_level,
-            ph_level, ec_level, organic_carbon_level,
-            overall_soil_health_score
-        FROM soil_health
-    """, soil_conn)
-    
-    fert_df = pd.read_sql_query("""
-        SELECT 
-            soil_type, crop_type,
-            n_ratio, p_ratio, k_ratio,
-            recommended_fertilizer,
-            effectiveness_score
-        FROM fertilizer_recommendations
-    """, fert_conn)
-    
-    soil_conn.close()
-    fert_conn.close()
-    
-    return soil_df, fert_df
+client = OpenAI(
+  base_url = "https://integrate.api.nvidia.com/v1",
+  api_key = "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"
+)
 
-def convert_to_ratio(row):
-    """Convert NPK levels to ratios for comparison"""
-    total = row['nitrogen_level'] + row['phosphorous_level'] + row['potassium_level']
-    return pd.Series({
-        'n_ratio': row['nitrogen_level'] / total if total > 0 else 0,
-        'p_ratio': row['phosphorous_level'] / total if total > 0 else 0,
-        'k_ratio': row['potassium_level'] / total if total > 0 else 0
-    })
+completion = client.chat.completions.create(
+  model="nvidia/llama-3.1-nemotron-70b-instruct",
+  messages=[{"role":"user","content":"Write a limerick about the wonders of GPU computing."}],
+  temperature=0.5,
+  top_p=1,
+  max_tokens=1024,
+  stream=True
+)
 
-def calculate_npk_match_score(soil_ratios, fert_ratios):
-    """Calculate how well fertilizer ratios match soil needs"""
-    # Lower soil levels indicate higher need for that nutrient
-    # Invert soil ratios to represent nutrient needs
-    n_need = 1 - soil_ratios['n_ratio']
-    p_need = 1 - soil_ratios['p_ratio']
-    k_need = 1 - soil_ratios['k_ratio']
-    
-    # Calculate match score (higher score means better match)
-    n_match = 1 - abs(n_need - fert_ratios['n_ratio'])
-    p_match = 1 - abs(p_need - fert_ratios['p_ratio'])
-    k_match = 1 - abs(k_need - fert_ratios['k_ratio'])
-    
-    return (n_match + p_match + k_match) / 3 * 100
+for chunk in completion:
+  if chunk.choices[0].delta.content is not None:
+    print(chunk.choices[0].delta.content, end="")
 
-def get_fertilizer_recommendations(soil_block, crop_type=None):
-    """Get fertilizer recommendations for a specific soil block and crop"""
-    # Load data
-    soil_df, fert_df = load_transformed_data()
-    
-    # Get soil data for the specified block
-    soil_data = soil_df[soil_df['block'] == soil_block].iloc[0]
-    
-    # Convert soil NPK levels to ratios
-    soil_ratios = convert_to_ratio(soil_data)
-    
-    # Calculate match scores for each fertilizer
-    recommendations = []
-    for _, fert in fert_df.iterrows():
-        if crop_type and fert['crop_type'] != crop_type:
-            continue
-            
-        match_score = calculate_npk_match_score(soil_ratios, fert)
-        
-        recommendations.append({
-            'fertilizer': fert['recommended_fertilizer'],
-            'crop_type': fert['crop_type'],
-            'soil_type': fert['soil_type'],
-            'match_score': match_score,
-            'effectiveness_score': fert['effectiveness_score'],
-            'overall_score': (match_score * 0.7 + fert['effectiveness_score'] * 0.3),
-            'soil_health_score': soil_data['overall_soil_health_score'],
-            'soil_ph': soil_data['ph_level'],
-            'soil_ec': soil_data['ec_level']
-        })
-    
-    # Convert to DataFrame and sort by overall score
-    recommendations_df = pd.DataFrame(recommendations)
-    recommendations_df = recommendations_df.sort_values('overall_score', ascending=False)
-    
-    return recommendations_df
-
-def main():
-    # Example usage
-    block = "ATMAKUR"  # Example block
-    crop = "Rice"      # Example crop type
-    
-    recommendations = get_fertilizer_recommendations(block, crop)
-    
-    print(f"\nFertilizer Recommendations for {block} (Crop: {crop}):")
-    print("\nTop 5 Recommended Fertilizers:")
-    print(recommendations[['fertilizer', 'match_score', 'effectiveness_score', 'overall_score']].head())
-    
-    # Create detailed report
-    conn = sqlite3.connect('Transformed_database/fertilizer_soil_matching.db')
-    recommendations.to_sql('fertilizer_recommendations_matched', conn, if_exists='replace', index=False)
-    conn.close()
-    
-    print("\nRecommendations have been saved to the database!")
-
-if __name__ == "__main__":
-    main()
