@@ -23,7 +23,7 @@ class FertilizerRecommendationSystem:
 
             requirements = {}
             for _, row in crop_data.iterrows():
-                requirements[row['crop_name'].lower()] = {  # Convert to lowercase
+                requirements[row['crop_name'].lower()] = {  
                     'N': {
                         'low': max(0, row['N'] * 0.8),
                         'medium': row['N'],
