@@ -5,15 +5,6 @@ from rich.table import Table
 
 class DatabaseFederator:
     def __init__(self, server_configs):
-        """
-        Initialize the DatabaseFederator with a list of server configurations.
-        Each server config contains:
-        {
-            "host": "35.224.12.105",
-            "port": 5555,
-            "db_name": "example"
-        }
-        """
         self.server_configs = server_configs
         self.console = Console()
 
@@ -50,10 +41,10 @@ class DatabaseFederator:
         if not data:
             self.console.print("[bold yellow]No data available to display.[/bold yellow]")
             return
-
-        table = Table(show_header=True, header_style="bold magenta")
-        for column in data[0].keys():
-            table.add_column(column)
-        for row in data:
-            table.add_row(*map(str, row.values()))
-        self.console.print(table)
+        print(data)
+        # table = Table(show_header=True, header_style="bold magenta")
+        # for column in data[0].keys():
+        #     table.add_column(column)
+        # for row in data:
+        #     table.add_row(*map(str, row.values()))
+        # self.console.print(table)

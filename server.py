@@ -12,8 +12,8 @@ logging.basicConfig(
 )
 
 #  badal de ye, ports sabki unique rakhio
-DB_FILE = "db/crop_prices.db"
-ZMQ_PORT = 1111
+DB_FILE = "soil_types.db"
+ZMQ_PORT = 5555
 
 def log_message(message):
     """Log a message with timestamp."""

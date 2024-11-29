@@ -4,7 +4,7 @@ import os
 
 def create_transformed_database():
     """Create transformed database for soil health data"""
-    transform_dir = "Transformed_database"
+    transform_dir = "WareHouse"
     os.makedirs(transform_dir, exist_ok=True)
     
     conn = sqlite3.connect(f'{transform_dir}/soil_health_transformed.db')

@@ -36,4 +36,4 @@ if __name__ == "__main__":
     db_file = 'database/crop_data.db'
 
     load_csv_to_db(csv_file, db_file)
-    load_csv_to_db(csv_file, 'Transformed_database/transformed_crop_data.db')
+    # load_csv_to_db(csv_file, 'Transformed_database/transformed_crop_data.db')

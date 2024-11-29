@@ -1,11 +1,47 @@
 import sqlite3
 import pandas as pd
 import os
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Add the project root directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
+from gcp_code.federator import DatabaseFederator
+
+# Load environment variables
+load_dotenv()
+
+# Server configurations
+SERVERS = [
+    {
+        "host": os.getenv("CROP_PRICES_HOST"),
+        "port": int(os.getenv("CROP_PRICES_PORT")),
+        "db_name": "crop_prices"
+    },
+    {
+        "host": os.getenv("IRRIGATED_AREA_HOST"),
+        "port": int(os.getenv("IRRIGATED_AREA_PORT")),
+        "db_name": "irrigated_area"
+    }
+]
+
+def validate_server_config():
+    """Validate that all required environment variables are set"""
+    for server in SERVERS:
+        if None in server.values():
+            raise EnvironmentError(
+                f"Missing environment variables for {server['db_name']}. "
+                "Please check your .env file."
+            )
 
 def create_transformed_databases():
     """Create separate transformed databases for crop and irrigation data"""
-    transform_dir = "Transformed_database"
+    transform_dir = "WareHouse"
     os.makedirs(transform_dir, exist_ok=True)
     
     # Create separate connections
@@ -53,14 +89,19 @@ def create_transformed_databases():
     irr_conn.commit()
     return crop_conn, irr_conn
 
-def transform_crop_prices(source_conn, target_conn):
+def transform_crop_prices(federator, crop_server, target_conn):
     """Transform crop prices data with additional analytics"""
     
-    # Read source data
-    df = pd.read_sql_query("""
-        SELECT * FROM crop_prices
-        ORDER BY Arrival_Date
-    """, source_conn)
+    # Fetch data using federator
+    query = "SELECT * FROM crop_prices ORDER BY Arrival_Date"
+    data = federator.query_server(crop_server, query)
+    
+    if data is None:
+        print("Failed to fetch crop prices data from the server")
+        return
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(data)
     
     transformed_data = []
     
@@ -68,7 +109,7 @@ def transform_crop_prices(source_conn, target_conn):
     for name, group in df.groupby(['State', 'District', 'Market', 'Commodity']):
         state, district, market, commodity = name
         
-        # Sort by date
+        # Rest of the transformation logic remains the same
         group = group.sort_values('Arrival_Date')
         
         for _, row in group.iterrows():
@@ -118,14 +159,19 @@ def transform_crop_prices(source_conn, target_conn):
     transformed_df = pd.DataFrame(transformed_data)
     transformed_df.to_sql('transformed_crop_prices', target_conn, if_exists='replace', index=False)
 
-def transform_irrigation_data(source_conn, target_conn):
+def transform_irrigation_data(federator, irr_server, target_conn):
     """Transform irrigation data with additional analytics"""
     
-    # Read source data
-    df = pd.read_sql_query("""
-        SELECT * FROM irrigated_area
-        ORDER BY Year
-    """, source_conn)
+    # Fetch data using federator
+    query = "SELECT * FROM irrigated_area ORDER BY Year"
+    data = federator.query_server(irr_server, query)
+    
+    if data is None:
+        print("Failed to fetch irrigation data from the server")
+        return
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(data)
     
     transformed_data = []
     
@@ -177,23 +223,31 @@ def transform_irrigation_data(source_conn, target_conn):
     transformed_df.to_sql('transformed_irrigation', target_conn, if_exists='replace', index=False)
 
 def main():
-    # Connect to source databases
-    crop_source_conn = sqlite3.connect('database/crop_prices.db')
-    irr_source_conn = sqlite3.connect('database/irrigated_area.db')
+    # Validate environment variables
+    validate_server_config()
+    
+    # Initialize federator
+    federator = DatabaseFederator(SERVERS)
+    
+    # Get server configurations
+    crop_server = next((server for server in SERVERS if server["db_name"] == "crop_prices"), None)
+    irr_server = next((server for server in SERVERS if server["db_name"] == "irrigated_area"), None)
+    
+    if not crop_server or not irr_server:
+        print("Error: Server configurations not found")
+        return
     
     # Create and connect to transformed databases
     crop_target_conn, irr_target_conn = create_transformed_databases()
     
     # Transform the data
     print("Transforming crop prices data...")
-    transform_crop_prices(crop_source_conn, crop_target_conn)
+    transform_crop_prices(federator, crop_server, crop_target_conn)
     
     print("Transforming irrigation data...")
-    transform_irrigation_data(irr_source_conn, irr_target_conn)
+    transform_irrigation_data(federator, irr_server, irr_target_conn)
     
     # Close connections
-    crop_source_conn.close()
-    irr_source_conn.close()
     crop_target_conn.close()
     irr_target_conn.close()
     

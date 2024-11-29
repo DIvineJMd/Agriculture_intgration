@@ -398,10 +398,15 @@ def main():
     forecast_hourly, forecast_daily = process_forecast_data(forecast_response)
     store_hourly_data(conn, location_id, forecast_hourly, is_forecast=True)
     store_daily_data(conn, location_id, forecast_daily, is_forecast=True)
-    
-    # Get and process historical data
-    days_back = int(input("\nHow many days of historical data would you like? "))
+
+    import sys
+
+    print("\nHow many days of historical data would you like?")
+    sys.stdout.flush()  # Ensure the output is printed before input
+    days_back = int(input())
     print(f"\n=== Historical Data (Past {days_back} days) ===")
+
+
     historical_response = get_historical_data(lat, lon, openmeteo, days_back)
     historical_hourly, historical_daily = process_historical_data(historical_response)
     store_hourly_data(conn, location_id, historical_hourly, is_forecast=False)

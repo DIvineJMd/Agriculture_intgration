@@ -5,7 +5,7 @@ import numpy as np
 class CropRecommendationSystem:
     def __init__(self):
         """Initialize the crop recommendation system"""
-        self.db_path = "Transformed_database"
+        self.db_path = "WareHouse"
         self.crop_requirements = self._load_crop_requirements()
 
     def _load_crop_requirements(self):

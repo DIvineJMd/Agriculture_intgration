@@ -1,12 +1,56 @@
 import pandas as pd
 import sqlite3
 import os
+import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Add the project root directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
+# Import after adding to path
+from gcp_code.federator import DatabaseFederator
+
+# Load environment variables
+load_dotenv()
+
+# Server configurations using only environment variables
+SERVERS = [
+
+    {
+        "host": os.getenv("FERTILIZER_PREDICTION_HOST"),
+        "port": int(os.getenv("FERTILIZER_PREDICTION_PORT")),
+        "db_name": "fertilizer_prediction"
+    }
+  
+]
+
+# Add validation to ensure all environment variables are set
+def validate_server_config():
+    """Validate that all required environment variables are set"""
+    for server in SERVERS:
+        if None in server.values():
+            raise EnvironmentError(
+                f"Missing environment variables for {server['db_name']}. "
+                "Please check your .env file."
+            )
+
+# Validate configuration when module loads
+validate_server_config()
+
+def get_server_config(db_name):
+    """Get server configuration by database name"""
+    return next(
+        (server for server in SERVERS if server["db_name"] == db_name),
+        None
+    )
 
 def create_transformed_database():
     """Create and set up the transformed fertilizer database"""
-    # Create transformed_database directory if it doesn't exist
-    transform_dir = Path("Transformed_database")
+    # Create WareHouse directory if it doesn't exist
+    transform_dir = Path("WareHouse")
     transform_dir.mkdir(exist_ok=True)
     
     conn = sqlite3.connect(transform_dir / 'fertilizer_recommendation.db')
@@ -102,13 +146,36 @@ def calculate_effectiveness_score(row):
     
     return min(100, base_score)  # Cap at 100
 
-def transform_fertilizer_data(source_conn, target_conn):
+def transform_fertilizer_data():
     """Transform fertilizer data with enhanced metrics and recommendations"""
-    df = pd.read_sql_query("SELECT * FROM fertilizer_data", source_conn)
+    # Find the fertilizer server from the imported servers list
+    fertilizer_server = next(
+        (server for server in SERVERS if server["db_name"] == "fertilizer_prediction"),
+        None
+    )
     
-    # Debug: Print column names
-    print("Available columns:", df.columns.tolist())
+    if not fertilizer_server:
+        print("Error: Fertilizer server configuration not found")
+        return
     
+    # Initialize federator
+    federator = DatabaseFederator(SERVERS)
+    
+    # Fetch data using federator
+    query = "SELECT * FROM fertilizer_data"
+    data = federator.query_server(fertilizer_server, query)
+    
+    if data is None:
+        print("Failed to fetch data from the server")
+        return
+        
+    # Convert to DataFrame
+    df = pd.DataFrame(data)
+    
+    # Create transformed database connection
+    target_conn = create_transformed_database()
+    
+    # Transform the data
     transformed_df = pd.DataFrame()
     transformed_df['soil_type'] = df['Soil_Type']
     transformed_df['crop_type'] = df['Crop_Type']
@@ -117,7 +184,7 @@ def transform_fertilizer_data(source_conn, target_conn):
     transformed_df['n_ratio'] = df['Nitrogen'] / df[['Nitrogen', 'Phosphorous', 'Potassium']].sum(axis=1)
     transformed_df['p_ratio'] = df['Phosphorous'] / df[['Nitrogen', 'Phosphorous', 'Potassium']].sum(axis=1)
     transformed_df['k_ratio'] = df['Potassium'] / df[['Nitrogen', 'Phosphorous', 'Potassium']].sum(axis=1)
-    transformed_df['temperature_category'] = df['Temparature'].apply(categorize_temperature)  # Note: 'Temparature' is misspelled in your data
+    transformed_df['temperature_category'] = df['Temparature'].apply(categorize_temperature)
     transformed_df['humidity_category'] = df['Humidity'].apply(categorize_humidity)
     transformed_df['moisture_category'] = df['Moisture'].apply(categorize_moisture)
     
@@ -125,9 +192,9 @@ def transform_fertilizer_data(source_conn, target_conn):
     transformed_df['soil_condition_score'] = df.apply(calculate_soil_condition_score, axis=1)
     transformed_df['recommended_fertilizer'] = df['Fertilizer_Name']
     
-    # Calculate application rate (simplified example)
+    # Calculate application rate
     transformed_df['application_rate'] = round(
-        (df['Nitrogen'] + df['Phosphorous'] + df['Potassium']) / 3 * 0.1, 2  # kg per hectare
+        (df['Nitrogen'] + df['Phosphorous'] + df['Potassium']) / 3 * 0.1, 2
     )
     
     # Calculate effectiveness score
@@ -142,6 +209,9 @@ def transform_fertilizer_data(source_conn, target_conn):
         if_exists='replace', 
         index=False
     )
+    
+    target_conn.close()
+    print("Fertilizer data transformation completed successfully!")
 
 def get_fertilizer_recommendations(conn, soil_type=None, crop_type=None):
     """Get fertilizer recommendations with optional filtering"""
@@ -169,25 +239,14 @@ def get_fertilizer_recommendations(conn, soil_type=None, crop_type=None):
     return pd.read_sql_query(query, conn)
 
 def main():
-    # Connect to source database
-    source_conn = sqlite3.connect('database/fertilizer_prediction.db')
+    transform_fertilizer_data()
     
-    # Create and connect to transformed database
-    target_conn = create_transformed_database()
-    
-    # Transform the data
-    transform_fertilizer_data(source_conn, target_conn)
-    
-    # Example: Get recommendations
-    recommendations = get_fertilizer_recommendations(target_conn)
+    # Example: Get recommendations from transformed database
+    conn = sqlite3.connect('WareHouse/fertilizer_recommendation.db')
+    recommendations = get_fertilizer_recommendations(conn)
     print("\nTop Fertilizer Recommendations:")
     print(recommendations.head())
-    
-    # Close connections
-    source_conn.close()
-    target_conn.close()
-    
-    print("\nFertilizer data transformation completed successfully!")
+    conn.close()
 
 if __name__ == "__main__":
     main()
