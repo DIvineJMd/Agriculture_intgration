@@ -2,11 +2,11 @@ import sqlite3
 import pandas as pd
 import numpy as np
 from datetime import datetime
-
+from geopy.geocoders import Nominatim
 class FertilizerRecommendationSystem:
     def __init__(self):
         """Initialize fertilizer recommendation system"""
-        self.db_path = "Transformed_database"
+        self.db_path = "WareHouse"
         self.crop_nutrient_requirements = self._load_crop_nutrient_requirements()
 
     def _load_crop_nutrient_requirements(self):
@@ -15,7 +15,7 @@ class FertilizerRecommendationSystem:
             conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
             query = """
             SELECT label as crop_name, N, P, K, rainfall, ph
-            FROM crop_data
+            FROM transformed_crop_data
             GROUP BY label
             """
             crop_data = pd.read_sql_query(query, conn)
@@ -56,24 +56,36 @@ class FertilizerRecommendationSystem:
         try:
             conn = sqlite3.connect(f'{self.db_path}/soil_health_transformed.db')
             query = """
-            SELECT nitrogen_level,
+            SELECT 
+                nitrogen_level,
                 phosphorous_level,
                 potassium_level,
+                organic_carbon_level,
                 ph_level,
-                district,
-                state,
+                ec_level,
+                npk_score,
+                micro_score,
                 overall_soil_health_score
             FROM soil_health
-            WHERE block = ?
+            WHERE LOWER(district) = LOWER(?)
+            GROUP BY district
             """
+            
             soil_data = pd.read_sql_query(query, conn, params=(location,))
             conn.close()
 
             if soil_data.empty:
                 return None
 
-            soil_dict = soil_data.iloc[0].to_dict()
+            soil_dict = {
+                'nitrogen_level': soil_data['nitrogen_level'].iloc[0],
+                'phosphorous_level': soil_data['phosphorous_level'].iloc[0],
+                'potassium_level': soil_data['potassium_level'].iloc[0],
+                'ph_level': soil_data['ph_level'].iloc[0],
+                'overall_soil_health_score': soil_data['overall_soil_health_score'].iloc[0]
+            }
             return soil_dict
+            
         except Exception as e:
             print(f"Error getting soil health data: {e}")
             return None
@@ -204,28 +216,68 @@ class FertilizerRecommendationSystem:
             return None
             
         try:
-            conn = sqlite3.connect(f'{self.db_path}/fertilizer_costs.db')
-            query = "SELECT nutrient, cost_per_kg FROM fertilizer_costs"
-            costs = pd.read_sql_query(query, conn)
+            conn = sqlite3.connect(f'{self.db_path}/fertilizer_recommendation.db')
+            query = """
+            SELECT 
+                n_ratio,
+                p_ratio,
+                k_ratio,
+                application_rate,
+                effectiveness_score
+            FROM fertilizer_recommendations
+            WHERE recommended_fertilizer = ?
+            ORDER BY effectiveness_score DESC
+            LIMIT 1
+            """
+            
+            fertilizer_data = pd.read_sql_query(query, conn, params=(recommended_fertilizer['fertilizer'],))
             conn.close()
             
-            base_cost = dict(zip(costs['nutrient'], costs['cost_per_kg']))
-            total_cost = sum(nutrient_requirements[nutrient] * base_cost[nutrient] 
-                           for nutrient in ['N', 'P', 'K'])
-                        
+            if fertilizer_data.empty:
+                # Fallback to default costs if fertilizer not found
+                base_cost = {'N': 50, 'P': 70, 'K': 40}
+                total_cost = sum(nutrient_requirements[nutrient] * base_cost[nutrient] 
+                               for nutrient in ['N', 'P', 'K'])
+                return round(total_cost, 2)
+            
+            # Calculate cost based on application rate and nutrient ratios
+            row = fertilizer_data.iloc[0]
+            application_rate = row['application_rate']
+            
+            # Base cost calculation using nutrient ratios
+            n_cost = nutrient_requirements['N'] * row['n_ratio'] * 50  # ₹50 per kg N
+            p_cost = nutrient_requirements['P'] * row['p_ratio'] * 70  # ₹70 per kg P
+            k_cost = nutrient_requirements['K'] * row['k_ratio'] * 40  # ₹40 per kg K
+            
+            total_cost = (n_cost + p_cost + k_cost) * (application_rate / 100)
+            
             return round(total_cost, 2)
+                        
         except Exception as e:
             print(f"Error calculating cost: {e}")
             # Fallback to default costs if database fails
             base_cost = {'N': 50, 'P': 70, 'K': 40}
             total_cost = sum(nutrient_requirements[nutrient] * base_cost[nutrient] 
-                           for nutrient in ['N', 'P', 'K'])
+                            for nutrient in ['N', 'P', 'K'])
             return round(total_cost, 2)
+    @staticmethod
+    def get_location_details(lat, lon):
+        """Get location details from latitude and longitude"""
+        geolocator = Nominatim(user_agent="IIA")
+        location = geolocator.reverse(f"{lat},{lon}")
+        state = location.raw['address'].get('state')
+        district = location.raw['address'].get('state_district')
+        return location.address, state, district
 
 def main():
     recommender = FertilizerRecommendationSystem()
-    location = "GOOTY"
-    crop = "mango"  # Make sure this matches the label in your crop_data table
+    lat = 17.6868
+    lon = 83.2185
+    
+    # Using the static method correctly
+    address, state, district = FertilizerRecommendationSystem.get_location_details(lat, lon)
+    location = district
+    crop = input("Enter the crop name : ")
     
     plan = recommender.get_fertilizer_plan(location, crop)
     

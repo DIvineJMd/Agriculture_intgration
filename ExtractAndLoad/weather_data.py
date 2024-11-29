@@ -367,7 +367,9 @@ def store_daily_data(conn, location_id, daily_df, is_forecast=True):
     
 def main():
     # Get location
-    lat, lon = get_location_by_ip()
+    # lat, lon = get_location_by_ip()
+    lat=17.6868
+    lon=83.2185
     address, state, district = get_location_details(lat, lon)
     
     print(f"Location: {address}")

@@ -2,55 +2,72 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import numpy as np
+from geopy.geocoders import Nominatim
+
+def get_location_details(lat, lon):
+    """Get location details from latitude and longitude"""
+    geolocator = Nominatim(user_agent="IIA")
+    location = geolocator.reverse(f"{lat},{lon}")
+    state = location.raw['address'].get('state')
+    district = location.raw['address'].get('state_district')
+    return location.address, state, district
 
 def get_soil_health_data(state, district=None):
-    """Get soil health data for given location"""
-    conn = sqlite3.connect('Transformed_database/soil_health_transformed.db')
+    """Get soil health data for location"""
+    conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
     
     query = """
-    SELECT *
+    SELECT 
+        nitrogen_level,
+        phosphorous_level,
+        potassium_level,
+        organic_carbon_level,
+        ph_level,
+        ec_level,
+        npk_score,
+        micro_score,
+        overall_soil_health_score
     FROM soil_health
-    WHERE state = ?
+    WHERE LOWER(state) = LOWER(?)
     """
     params = [state]
     
     if district:
-        query += " AND district = ?"
+        query += " AND LOWER(district) = LOWER(?)"
         params.append(district)
     
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
+    query += " GROUP BY state"  # Aggregate at state level
     
-    if df.empty:
-        return None
+    try:
+        df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
         
-    # Separate numeric and categorical columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    
-    # Calculate means only for numeric columns
-    result = {}
-    
-    # Handle numeric columns
-    numeric_means = df[numeric_cols].mean()
-    for col in numeric_cols:
-        result[col] = numeric_means[col]
-    
-    # Handle categorical columns (take most frequent value)
-    categorical_cols = df.select_dtypes(exclude=[np.number]).columns
-    categorical_modes = df[categorical_cols].mode().iloc[0]
-    for col in categorical_cols:
-        result[col] = categorical_modes[col]
-    return result
+        if df.empty:
+            print(f"No soil health data found for {state}")
+            return None
+            
+        # Return averaged values
+        return {
+            'overall_soil_health_score': df['overall_soil_health_score'].mean(),
+            'npk_score': df['npk_score'].mean(),
+            'micro_score': df['micro_score'].mean(),
+            'ph_level': df['ph_level'].iloc[0],
+            'ec_level': df['ec_level'].iloc[0]
+        }
+        
+    except Exception as e:
+        print(f"Error getting soil health data: {str(e)}")
+        conn.close()
+        return None
 
 def get_weather_conditions(state, district=None):
     """Get weather and soil conditions"""
-    conn = sqlite3.connect('Transformed_database/weather_data.db')
+    conn = sqlite3.connect('WareHouse/weather_data.db')
     
     # Normalize state name to match database
-    state = state.title()  # Convert "ANDHRA PRADESH" to "Andhra Pradesh"
+    state = state.title()
     if district:
-        district = district.title()  # Also normalize district name
-    
+        district = district.title()
     
     # First, let's check if we have any data at all
     check_query = """
@@ -62,7 +79,6 @@ def get_weather_conditions(state, district=None):
     FROM transformed_weather
     """
     check_df = pd.read_sql_query(check_query, conn)
-   
     
     # Modified main query to handle date comparison better
     query = """
@@ -71,7 +87,7 @@ def get_weather_conditions(state, district=None):
             temperature_max,
             temperature_min,
             humidity_avg,
-            COALESCE(precipitation_sum, 0) + COALESCE(rain_sum, 0) as total_precipitation,
+            COALESCE(precipitation_sum, 0) as total_precipitation,
             soil_moisture_surface,
             soil_moisture_deep,
             soil_temperature_surface,
@@ -82,8 +98,9 @@ def get_weather_conditions(state, district=None):
             is_forecast,
             date
         FROM transformed_weather
-        WHERE state = ?
+        WHERE LOWER(state) = LOWER(?)
         {}  -- Placeholder for district filter
+        AND date >= date('now', '-30 days')
     )
     SELECT 
         AVG(CASE WHEN is_forecast = 0 THEN temperature_max END) as historical_temp_max,
@@ -101,7 +118,7 @@ def get_weather_conditions(state, district=None):
     FROM recent_weather
     """
     
-    district_filter = "AND district = ?" if district else ""
+    district_filter = "AND LOWER(district) = LOWER(?)" if district else ""
     query = query.format(district_filter)
     params = [state, district] if district else [state]
     
@@ -180,260 +197,192 @@ def calculate_growing_condition_score(weather_data):
     
     return min(max(score, 0), 100)
 
-def get_crop_price_trends(state, crop):
-    """Get historical crop price trends"""
-    conn = sqlite3.connect('Transformed_database/crop_prices_transformed.db')
-    state = state.title()
-    df = pd.read_sql_query("""
-        SELECT *
-        FROM transformed_crop_prices
-        WHERE state = ? AND commodity = ?
-        ORDER BY arrival_date DESC
-        LIMIT 365
-    """, conn, params=[state, crop])
-    conn.close()
-    return df if not df.empty else None
-
 def get_irrigation_data(state):
     """Get irrigation availability data"""
-    conn = sqlite3.connect('Transformed_database/irrigation_transformed.db') # 
+    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
     
-    df = pd.read_sql_query("""
-        SELECT *
-        FROM transformed_irrigation
-        WHERE state = ?
-        ORDER BY year DESC
-        LIMIT 1
-    """, conn, params=[state])
-    conn.close()
-    return df.iloc[0] if not df.empty else None
+    query = """
+    SELECT 
+        total_irrigated_area,
+        canal_percentage,
+        tank_percentage,
+        tubewell_percentage,
+        other_sources_percentage,
+        irrigation_coverage_ratio,
+        irrigation_growth_rate,
+        water_source_diversity_score
+    FROM transformed_irrigation
+    WHERE LOWER(state) = LOWER(?)
+    ORDER BY year DESC
+    LIMIT 1
+    """
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=[state])
+        conn.close()
+        
+        if df.empty:
+            print(f"No irrigation data found for {state}")
+            return {
+                'irrigation_coverage': 50.0,
+                'growth_trend': 0.0,
+                'water_availability_score': 50.0
+            }
+        
+        return {
+            'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
+            'growth_trend': df['irrigation_growth_rate'].iloc[0],
+            'water_availability_score': df['water_source_diversity_score'].iloc[0]
+        }
+        
+    except Exception as e:
+        print(f"Error getting irrigation data: {str(e)}")
+        conn.close()
+        return {
+            'irrigation_coverage': 50.0,
+            'growth_trend': 0.0,
+            'water_availability_score': 50.0
+        }
+
+def get_crop_price_trends(state, crop):
+    """Get historical crop price trends"""
+    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
+    
+    query = """
+    SELECT 
+        arrival_date,
+        price_per_quintal,
+        monthly_avg_price,
+        price_trend_indicator,
+        seasonal_index,
+        price_volatility,
+        district,
+        market
+    FROM transformed_crop_prices
+    WHERE LOWER(state) = LOWER(?) 
+    AND LOWER(commodity) = LOWER(?)
+    ORDER BY arrival_date DESC
+    LIMIT 365
+    """
+    
+    try:
+        df = pd.read_sql_query(query, conn, params=[state, crop])
+        conn.close()
+        
+        if df.empty:
+            print(f"No price data found for {crop} in {state}")
+            return None
+            
+        return df
+        
+    except Exception as e:
+        print(f"Error getting price trends: {str(e)}")
+        conn.close()
+        return None
 
 def analyze_profit_potential(crop, state, district=None):
-    """Analyze profit potential for given crop and location"""
-    
-    # Initialize empty dictionaries for results
-    risk_factors = {}
-    profit_factors = {}
+    """Analyze profit potential for a crop in a given location"""
+    # Get weather conditions
+    weather_data = get_weather_conditions(state, district)
     
     # Get soil health data
     soil_data = get_soil_health_data(state, district)
-    if soil_data is None:
-        soil_data = get_soil_health_data(state)  # Fallback to state level
     
-    # Get weather conditions
-    weather_data = get_weather_conditions(state, district)
-    if weather_data is None:
-        weather_data = get_weather_conditions(state)  # Fallback to state level
-    
-    if weather_data is not None:
-        # Weather risk assessment with detailed metrics
-        risk_factors['weather'] = {
-            'growing_conditions': weather_data.get('growing_condition_score', 0),
-            'moisture_status': weather_data.get('soil_moisture_surface', 0),
-            'temperature_variation': abs(
-                weather_data.get('temperature_max', 0) - 
-                weather_data.get('temperature_min', 0)
-            ),
-            'precipitation': weather_data.get('precipitation_sum', 0)
-        }
-    else:
-        print(" No weather data found at all")
-    
-    # Get crop price trends
-    price_trends = get_crop_price_trends(state, crop)
+    # Get price trends
+    price_data = get_crop_price_trends(state, crop)
     
     # Get irrigation data
     irrigation_data = get_irrigation_data(state)
+
     
-    if soil_data is not None:
-        # Soil health risk assessment
-        risk_factors['soil_health'] = {
-            'score': soil_data.get('overall_soil_health_score', 0),
-            'npk_status': soil_data.get('npk_score', 0),
-            'micro_nutrients': soil_data.get('micro_score', 0),
-            'ph_level': soil_data.get('ph_level', 'Unknown'),
-            'ec_level': soil_data.get('ec_level', 'Unknown')
+    # Calculate risk factors
+    risk_factors = {
+        'weather': {
+            'growing_conditions': weather_data.get('growing_condition_score', 50.0),
+            'moisture_status': weather_data.get('soil_moisture_surface', 0.5),
+            'temperature_variation': abs(weather_data.get('temperature_max', 30) - 
+                                      weather_data.get('temperature_min', 20)),
+            'precipitation': weather_data.get('precipitation_sum', 0)
+        },
+        'soil_health': {
+            'score': soil_data.get('overall_soil_health_score', 50.0),
+            'npk_status': soil_data.get('npk_score', 50.0),
+            'micro_nutrients': soil_data.get('micro_score', 50.0),
+            'ph_level': soil_data.get('ph_level', 'Neutral'),
+            'ec_level': soil_data.get('ec_level', 'Non Saline')
+        },
+        'irrigation': {
+            'coverage': irrigation_data.get('irrigation_coverage', 0),
+            'growth_rate': irrigation_data.get('growth_trend', 0)
         }
+    }
     
-    if price_trends is not None and not price_trends.empty:
-        # Price risk and profit potential assessment
-        avg_price = price_trends['price_per_quintal'].mean()
-        price_volatility = price_trends['price_volatility'].mean()
-        seasonal_index = price_trends['seasonal_index'].mean()
-        
-        profit_factors['price'] = {
-            'average_price': float(avg_price),
-            'price_volatility': float(price_volatility),
-            'seasonal_strength': float(seasonal_index)
-        }
+    # Calculate profit potential score (0-100)
+    weather_score = risk_factors['weather']['growing_conditions']
+    soil_score = risk_factors['soil_health']['score']
+    irrigation_score = irrigation_data.get('irrigation_coverage', 50.0)
     
-    if irrigation_data is not None:
-        # Irrigation risk assessment
-        risk_factors['irrigation'] = {
-            'coverage': float(irrigation_data.get('irrigation_coverage_ratio', 0)),
-            'growth_rate': float(irrigation_data.get('irrigation_growth_rate', 0))
-        }
-    
-    # Calculate overall profit potential score (0-100)
-    profit_score = calculate_profit_score(risk_factors, profit_factors)
-    
-    # Determine best planting times based on seasonal index
-    best_planting_times = recommend_planting_times(price_trends) if price_trends is not None else []
+    profit_potential = (
+        weather_score * 0.4 +
+        soil_score * 0.35 +
+        irrigation_score * 0.25
+    )
     
     # Generate recommendations
-    recommendations = generate_recommendations(risk_factors, profit_factors)
+    recommendations = []
     
-    # Return complete analysis results
+    if soil_score < 60:
+        recommendations.append("Consider soil improvement measures before planting")
+    if irrigation_score < 40:
+        recommendations.append("Invest in irrigation infrastructure or choose drought-resistant varieties")
+    if weather_score < 50:
+        recommendations.append("Consider protected cultivation methods")
+    
     return {
         'crop': crop,
         'location': {'state': state, 'district': district},
-        'profit_potential_score': profit_score,
+        'profit_potential_score': profit_potential,
         'risk_factors': risk_factors,
-        'profit_factors': profit_factors,
-        'best_planting_times': best_planting_times,
         'recommendations': recommendations
     }
 
-def calculate_profit_score(risk_factors, profit_factors):
-    """Calculate overall profit potential score"""
-    score = 50  # Base score
+def main():
+    # Get location details (example coordinates for Visakhapatnam)
+    lat, lon = 17.6868, 83.2185
+    address, state, district = get_location_details(lat, lon)
     
-    # Adjust for soil health
-    if 'soil_health' in risk_factors:
-        soil_health = risk_factors['soil_health']
-        if isinstance(soil_health['score'], (int, float)):
-            score += soil_health['score'] * 0.2
-        if isinstance(soil_health['npk_status'], (int, float)):
-            score += soil_health['npk_status'] * 0.15
-        if isinstance(soil_health['micro_nutrients'], (int, float)):
-            score += soil_health['micro_nutrients'] * 0.15
+    print("\nLocation Details:")
+    print(f"Address: {address}")
+    print(f"State: {state}")
+    print(f"District: {district}")
     
-    # Adjust for weather conditions
-    if 'weather' in risk_factors:
-        weather = risk_factors['weather']
-        if isinstance(weather['growing_conditions'], (int, float)):
-            score += weather['growing_conditions'] * 0.15
-        if isinstance(weather['moisture_status'], (int, float)):
-            score += weather['moisture_status'] * 0.1
+    # Get crop input
+    crop = input("Enter the crop name you want to analyze: ").lower()
     
-    # Adjust for price factors
-    if 'price' in profit_factors:
-        price_data = profit_factors['price']
-        if isinstance(price_data['seasonal_strength'], (int, float)):
-            score += (price_data['seasonal_strength'] * 10) * 0.25
-        if isinstance(price_data['price_volatility'], (int, float)):
-            score -= (price_data['price_volatility'] * 10) * 0.1
-    
-    # Adjust for irrigation
-    if 'irrigation' in risk_factors:
-        irrigation = risk_factors['irrigation']
-        if isinstance(irrigation['coverage'], (int, float)):
-            score += irrigation['coverage'] * 0.1
-        if isinstance(irrigation['growth_rate'], (int, float)):
-            score += irrigation['growth_rate'] * 0.05
-    
-    return min(max(score, 0), 100)  # Ensure score is between 0 and 100
-
-def recommend_planting_times(price_trends):
-    """Determine optimal planting times based on price seasonality"""
-    if price_trends is None:
-        return []
-    
-    # Group by month and calculate average seasonal index
-    price_trends['month'] = pd.to_datetime(price_trends['arrival_date']).dt.month
-    monthly_indices = price_trends.groupby('month')['seasonal_index'].mean()
-    
-    # Find months with above-average seasonal index
-    good_months = monthly_indices[monthly_indices > 1].index.tolist()
-    
-    # Convert month numbers to names
-    month_names = {
-        1: 'January', 2: 'February', 3: 'March', 4: 'April',
-        5: 'May', 6: 'June', 7: 'July', 8: 'August',
-        9: 'September', 10: 'October', 11: 'November', 12: 'December'
-    }
-    
-    return [month_names[m] for m in good_months]
-
-def generate_recommendations(risk_factors, profit_factors):
-    """Generate specific recommendations based on analysis"""
-    recommendations = []
-    
-    if 'soil_health' in risk_factors:
-        soil_score = risk_factors['soil_health']['score']
-        if soil_score < 60:
-            recommendations.append("Consider soil improvement measures before planting")
-    
-    if 'weather' in risk_factors:
-        growing_conditions = risk_factors['weather']['growing_conditions']
-        if growing_conditions < 50:
-            recommendations.append("Monitor weather conditions closely; consider delayed planting")
-    
-    if 'price' in profit_factors:
-        if profit_factors['price']['price_volatility'] > 0.2:
-            recommendations.append("High price volatility - consider forward contracts")
-    
-    return recommendations
-
-if __name__ == "__main__":
-    # Example usage for Andhra Pradesh, Anantapur
+    # Get analysis
     analysis = analyze_profit_potential(
-        crop="Maize",
-        state="ANDHRA PRADESH",
-        district="ANANTAPUR"
+        crop=crop,
+        state=state,
+        district=district
     )
     
+    # Print results
     print("\nProfit Maximization Analysis Results:")
     print(f"Crop: {analysis['crop']}")
     print(f"Location: {analysis['location']}")
     print(f"\nProfit Potential Score: {analysis['profit_potential_score']:.2f}/100")
-    
-    # Print financial metrics first
-    if 'profit_factors' in analysis and 'price' in analysis['profit_factors']:
-        price_data = analysis['profit_factors']['price']
-        print("\nFinancial Metrics:")
-        print(f"- Average Market Price: ₹{price_data['average_price']:.2f} per quintal")
-        print(f"- Price Volatility: {price_data['price_volatility']*100:.1f}%")
-        print(f"- Seasonal Price Strength: {price_data['seasonal_strength']:.2f}")
-        
-        # Calculate estimated returns
-        base_yield = 25  # Example base yield in quintals per acre
-        estimated_yield = base_yield * (analysis['profit_potential_score']/100)
-        estimated_revenue = estimated_yield * price_data['average_price']
-        
-        print("\nEstimated Returns (per acre):")
-        print(f"- Projected Yield: {estimated_yield:.1f} quintals")
-        print(f"- Potential Revenue: ₹{estimated_revenue:,.2f}")
-        
-        # Add volatility range
-        price_range_low = price_data['average_price'] * (1 - price_data['price_volatility'])
-        price_range_high = price_data['average_price'] * (1 + price_data['price_volatility'])
-        print(f"- Price Range: ₹{price_range_low:,.2f} - ₹{price_range_high:,.2f} per quintal")
     
     if analysis['risk_factors']:
         print("\nRisk Assessment:")
         for category, factors in analysis['risk_factors'].items():
             print(f"\n{category.title()}:")
             for factor, value in factors.items():
-                if isinstance(value, (int, float)):
-                    print(f"- {factor}: {value:.2f}")
-                else:
-                    print(f"- {factor}: {value}")
-    
-    if analysis['best_planting_times']:
-        print("\nBest Planting Times for Maximum Returns:", ", ".join(analysis['best_planting_times']))
+                print(f"- {factor}: {value}")
     
     if analysis['recommendations']:
         print("\nFinancial Recommendations:")
         for rec in analysis['recommendations']:
             print(f"- {rec}")
-        
-        # Add financial-specific recommendations
-        if 'profit_factors' in analysis and 'price' in analysis['profit_factors']:
-            price_data = analysis['profit_factors']['price']
-            if price_data['seasonal_strength'] > 1.2:
-                print("- Consider storage facilities to sell during peak price periods")
-            if price_data['price_volatility'] < 0.1:
-                print("- Stable prices suggest good opportunity for fixed-price contracts")
-            if price_data['average_price'] > 2000:  # Example threshold
-                print("- High market prices indicate good profit potential with proper risk management")
+
+if __name__ == "__main__":
+    main()

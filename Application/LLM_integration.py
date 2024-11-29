@@ -85,7 +85,7 @@ class ChatHistory:
 class NvidiaLLMQueryGenerator:
     def __init__(self):
         """Initialize the Database Query Generator with NVIDIA's NeMo LLM"""
-        self.db_path = "Transformed_database"
+        self.db_path = "WareHouse"
         self.available_databases = {
             'crop_prices': 'crop_prices_transformed.db',
             'soil_health': 'soil_health_transformed.db',
@@ -350,7 +350,8 @@ Instructions:
 - Use simple, clear language
 - Include specific numbers and dates
 - Avoid phrases like "Based on the data" or "Here is a summary"
-- If relevant, reference or compare with previous conversation data
+- If relevant, reference or compare with previous conversation data other wise don't mention it.
+- If possible, provide a table of results.
 - Keep it brief but informative"""
             
             completion = self.client.chat.completions.create(
