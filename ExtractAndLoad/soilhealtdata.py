@@ -102,7 +102,7 @@ def setup_driver(download_dir):
     options.add_experimental_option("prefs", prefs)
     
     # Specify Brave browser binary location
-    brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+    brave_path = r"C:\Users\param\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
     if not os.path.exists(brave_path):
         logger.error(f"Brave browser not found at: {brave_path}")
         raise FileNotFoundError(f"Brave browser not found at: {brave_path}")

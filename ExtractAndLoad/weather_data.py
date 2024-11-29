@@ -41,8 +41,7 @@ def get_forecast_data(lat, lon, openmeteo):
     return openmeteo.weather_api(url, params=params)[0]
 
 def get_historical_data(lat, lon, openmeteo, days_back):
-    # Use yesterday as end_date to avoid range issues
-    end_date = (datetime.now() - timedelta(days=1)).date()
+    end_date = datetime.now().date()
     start_date = end_date - timedelta(days=days_back)
     
     url = "https://historical-forecast-api.open-meteo.com/v1/forecast"
