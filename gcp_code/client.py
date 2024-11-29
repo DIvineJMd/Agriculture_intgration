@@ -13,7 +13,7 @@ console = Console()
 # Add this near the top of the file, after the imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def run_script(script_path):
+def run_script(script_path, args=None):
     """Run a script and handle its output in real-time"""
     try:
         # Set environment variables to disable Chrome logging
@@ -22,9 +22,14 @@ def run_script(script_path):
         env['WDM_LOG_LEVEL'] = '0'
         env['WDM_PRINT_FIRST_LINE'] = 'False'
 
+        # Prepare command with optional arguments
+        command = [sys.executable, "-u", script_path]
+        if args:
+            command.extend(args)
+
         # Run the script with modified environment
         process = subprocess.Popen(
-            [sys.executable, "-u", script_path],
+            command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
