@@ -14,6 +14,8 @@ from selenium.webdriver import ActionChains
 from selenium.webdriver.common.keys import Keys
 import sqlite3
 import pandas as pd
+import requests
+from geopy.geocoders import Nominatim
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -38,8 +40,16 @@ def wait_for_element(driver, by, value, timeout=20, condition="clickable"):
         logger.error(f"Element became stale: {value}")
         raise
 
-def select_from_mui_dropdown(driver, dropdown_selector, option_text, is_xpath=True):
-    """Helper function to select an option from a MUI dropdown."""
+def calculate_jaccard_similarity(str1, str2):
+    """Calculate Jaccard similarity between two strings."""
+    set1 = set(str1.lower())
+    set2 = set(str2.lower())
+    intersection = len(set1.intersection(set2))
+    union = len(set1.union(set2))
+    return intersection / union if union != 0 else 0
+
+def select_from_mui_dropdown(driver, dropdown_selector, target_text, is_xpath=True):
+    """Helper function to select an option from a MUI dropdown with fuzzy matching."""
     try:
         # Wait for and click the dropdown
         dropdown = wait_for_element(
@@ -51,33 +61,42 @@ def select_from_mui_dropdown(driver, dropdown_selector, option_text, is_xpath=Tr
         
         # Try multiple methods to open the dropdown
         try:
-            # Method 1: Direct click
             dropdown.click()
         except:
             try:
-                # Method 2: JavaScript click
                 driver.execute_script("arguments[0].click();", dropdown)
             except:
                 try:
-                    # Method 3: Action chains
                     actions = ActionChains(driver)
                     actions.move_to_element(dropdown).click().perform()
                 except:
-                    # Method 4: Send space key
                     dropdown.send_keys(Keys.SPACE)
         
         time.sleep(1)  # Wait for dropdown animation
         
-        # Wait for and click the option
-        option = wait_for_element(
-            driver,
-            By.XPATH,
-            f"//li[contains(@class, 'MuiMenuItem-root') and normalize-space(text())='{option_text}']",
-            condition="clickable"
-        )
-        driver.execute_script("arguments[0].click();", option)
+        # Get all options and find best match
+        options = driver.find_elements(By.XPATH, "//li[contains(@class, 'MuiMenuItem-root')]")
+        best_match = None
+        best_similarity = -1
         
-        return True
+        logger.info("Available options in dropdown:")
+        for option in options:
+            option_text = option.text.strip()
+            similarity = calculate_jaccard_similarity(target_text, option_text)
+            logger.info(f"- {option_text} (data-value: {option.get_attribute('data-value')}) [similarity: {similarity:.3f}]")
+            
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_match = option
+        
+        if best_match and best_similarity > 0.5:  # Threshold for minimum similarity
+            logger.info(f"Best match found: '{best_match.text}' with similarity {best_similarity:.3f}")
+            driver.execute_script("arguments[0].click();", best_match)
+            return True
+        else:
+            logger.error(f"No good match found for '{target_text}'. Best similarity was {best_similarity:.3f}")
+            return False
+            
     except Exception as e:
         logger.error(f"Failed to select from dropdown: {str(e)}")
         return False
@@ -91,7 +110,7 @@ def setup_driver(download_dir):
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--window-size=1920,1080')
     
-    # Configure download settings
+    # Configure download settings 
     prefs = {
         "download.default_directory": download_dir,
         "download.prompt_for_download": False,
@@ -102,7 +121,7 @@ def setup_driver(download_dir):
     options.add_experimental_option("prefs", prefs)
     
     # Specify Brave browser binary location
-    brave_path = r"C:\Users\param\AppData\Local\BraveSoftware\Brave-Browser\Application\brave.exe"
+    brave_path = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
     if not os.path.exists(brave_path):
         logger.error(f"Brave browser not found at: {brave_path}")
         raise FileNotFoundError(f"Brave browser not found at: {brave_path}")
@@ -319,9 +338,10 @@ def download_soil_health_data(state="ANDHRA PRADESH", district="ANANTAPUR", down
             logger.info(f"Clicked on {tab_name} tab")
             time.sleep(2)  # Wait for tab switch
             
-            # Select state
+            # Print available states before selection
             logger.info(f"Selecting state: {state}")
             state_xpath = "//div[contains(@class, 'MuiFormControl-root')]//div[contains(@class, 'MuiSelect-select') and contains(@class, 'MuiOutlinedInput-input') and contains(text(), 'Select a state')]"
+         
             state_success = select_from_mui_dropdown(
                 driver,
                 state_xpath,
@@ -396,6 +416,39 @@ def download_soil_health_data(state="ANDHRA PRADESH", district="ANANTAPUR", down
             driver.quit()
             logger.info("Browser closed")
 
+def get_location_by_ip():
+    """Get latitude and longitude from IP address."""
+    try:
+        response = requests.get("https://ipinfo.io")
+        data = response.json()
+        location = data.get("loc", "Unknown")
+        latitude, longitude = location.split(",") if location != "Unknown" else (None, None)
+        logger.info(f"Retrieved location: {latitude}, {longitude}")
+        return latitude, longitude
+    except Exception as e:
+        logger.error(f"Error getting location by IP: {str(e)}")
+        return None, None
+
+def get_location_details(lat, lon):
+    """Get state and district from latitude and longitude."""
+    try:
+        geolocator = Nominatim(user_agent="IIA")
+        location = geolocator.reverse(f"{lat},{lon}")
+        
+        # Convert state to uppercase and format district appropriately
+        state = location.raw['address'].get('state', '').upper()
+        district = location.raw['address'].get('state_district', '')
+        
+        # Format district: First letter of each word capitalized
+        if district:
+            district = district.title()
+        
+        logger.info(f"Retrieved state: {state}, district: {district}")
+        return location.address, state, district
+    except Exception as e:
+        logger.error(f"Error getting location details: {str(e)}")
+        return None, None, None
+
 if __name__ == "__main__":
     try:
         # Create databases first
@@ -403,9 +456,21 @@ if __name__ == "__main__":
         macro_conn.close()
         micro_conn.close()
         
+        # Get location details
+        # lat, lon = get_location_by_ip()
+        lat=17.6868
+        lon=83.2185
+        
+        if lat and lon:
+            _, state, district = get_location_details(lat, lon)
+        else:
+            # Default fallback values
+            state, district = "ANDHRA PRADESH", "ANANTAPUR"
+            logger.warning("Using default location values")
+        
         # Create a temporary download directory
         download_dir = os.path.join(os.getcwd(), "temp_downloads")
-        success = download_soil_health_data(download_dir=download_dir)
+        success = download_soil_health_data(state=state, district=district, download_dir=download_dir)
         
         # Clean up temporary download directory
         if os.path.exists(download_dir):
