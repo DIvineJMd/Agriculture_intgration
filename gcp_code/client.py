@@ -25,15 +25,16 @@ if __name__ == "__main__":
                 server_idx = int(input("Select a server by index: ").strip())
                 selected_server = servers[server_idx]
 
-                # import subprocess
-                # for folder in ["Transformed_database", "database"]:
-                #     for filename in os.listdir(folder):
-                #         file_path = os.path.join(folder, filename)
-                #         if os.path.isfile(file_path):
-                #             os.remove(file_path) 
-                # subprocess.run(["python", "ExtractAndLoad/weather_data.py"])  # Execute weather_data.py
-                # subprocess.run(["python", "Transformation/weatherTransformation.py"])  
-                
+                import subprocess
+                for folder in ["WareHouse", "database"]:
+                    for filename in os.listdir(folder):
+                        file_path = os.path.join(folder, filename)
+                        if os.path.isfile(file_path):
+                            os.remove(file_path) 
+                subprocess.run(["python", "ExtractAndLoad/weather_data.py"])  # Execute weather_data.py
+                subprocess.run(["python", "Transformation/weatherTransformation.py"])  
+                subprocess.run(["python", "ExtractAndLoad/soilhealtdata.py"])  # Execute weather_data.py
+                subprocess.run(["python", "Transformation/soilhealthTransformation.py"])  
 
                 # Query input
                 query = input("Enter SQL query: ").strip()
