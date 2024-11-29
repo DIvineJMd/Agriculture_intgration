@@ -9,7 +9,7 @@ class DatabaseFederator:
         Initialize the DatabaseFederator with a list of server configurations.
         Each server config contains:
         {
-            "host": "127.0.0.1",
+            "host": "35.224.12.105",
             "port": 5555,
             "db_name": "example"
         }

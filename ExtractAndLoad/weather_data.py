@@ -6,7 +6,7 @@ from retry_requests import retry
 from geopy.geocoders import Nominatim
 from datetime import datetime, timedelta
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 def get_location_by_ip():
@@ -41,7 +41,7 @@ def get_forecast_data(lat, lon, openmeteo):
     return openmeteo.weather_api(url, params=params)[0]
 
 def get_historical_data(lat, lon, openmeteo, days_back):
-    end_date = datetime.now().date()
+    end_date = (datetime.now()-timedelta(days=1)).date()
     start_date = end_date - timedelta(days=days_back)
     
     url = "https://historical-forecast-api.open-meteo.com/v1/forecast"
