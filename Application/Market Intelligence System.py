@@ -375,7 +375,7 @@ def print_location_analysis(state, district=None):
         print("-" * len(crop))
         
         # Price Statistics
-        print("\nPrice Statistics:")
+        print("\n[bold yellow]Price Statistics:[/bold yellow]")
         print(f"- Average Price: ₹{row['avg_price']:,.2f} per quintal")
         print(f"- Price Range: ₹{row['min_price']:,.2f} - ₹{row['max_price']:,.2f}")
         print(f"- Price Volatility: {row['avg_volatility']}%")
@@ -385,19 +385,19 @@ def print_location_analysis(state, district=None):
         # Get detailed market insights
         insights = get_market_insights(crop, state, district)
         if insights:
-            print("\nMarket Intelligence:")
+            print("\n[bold cyan]Market Intelligence:[/bold cyan]")
             print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
             print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             
             forecast = insights['price_forecast']['short_term']
-            print(f"\nPrice Forecast:")
+            print(f"\n[bold blue]Price Forecast:[/bold blue]")
             print(f"- Expected Range: ₹{forecast['range']['low']:,.2f} - ₹{forecast['range']['high']:,.2f}")
             
-            print("\nBest Selling Periods:")
+            print("\n[bold green]Best Selling Periods:[/bold green]")
             for period in insights['best_selling_periods']:
                 print(f"- {period}")
             
-            print("\nRecommendations:")
+            print("\n[bold yellow]Recommendations:[/bold yellow]")
             for rec in insights['recommendations']:
                 print(f"- {rec}")
         

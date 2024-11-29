@@ -10,3 +10,6 @@ requests-cache
 retry-requests 
 numpy
 rich
+mysql
+openai
+dotenv

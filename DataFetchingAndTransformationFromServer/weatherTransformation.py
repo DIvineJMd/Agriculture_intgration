@@ -224,7 +224,7 @@ def main():
     source_conn.close()
     target_conn.close()
     
-    print("Weather data transformation completed successfully!")
+    print("[bold yellow]Weather data transformation completed successfully![/bold yellow]")
 
 if __name__ == "__main__":
     main()

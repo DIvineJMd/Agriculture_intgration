@@ -166,7 +166,7 @@ def transform_fertilizer_data():
     data = federator.query_server(fertilizer_server, query)
     
     if data is None:
-        print("Failed to fetch data from the server")
+        print("[bold red]Failed to fetch data from the server[/bold red]")
         return
         
     # Convert to DataFrame
@@ -211,7 +211,7 @@ def transform_fertilizer_data():
     )
     
     target_conn.close()
-    print("Fertilizer data transformation completed successfully!")
+    print("[bold yellow]Fertilizer data transformation completed successfully![/bold yellow]")
 
 def get_fertilizer_recommendations(conn, soil_type=None, crop_type=None):
     """Get fertilizer recommendations with optional filtering"""

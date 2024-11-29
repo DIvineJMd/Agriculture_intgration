@@ -330,7 +330,7 @@ def main():
     for key, value in recommendations['location_details'].items():
         print(f"{key.replace('_', ' ').title()}: {value}")
     
-    print("\nHighly Suitable Crops:")
+    print("\n[bold green]Highly Suitable Crops:[/bold green]")
     if recommendations['highly_suitable_crops']:
         for crop in recommendations['highly_suitable_crops']:
             print(f"\n{crop['crop']}:")
@@ -343,7 +343,7 @@ def main():
     else:
         print("No highly suitable crops found for this location and season")
     
-    print("\nModerately Suitable Crops:")
+    print("\n[bold yellow]Moderately Suitable Crops:[/bold yellow]")
     if recommendations['moderately_suitable_crops']:
         for crop in recommendations['moderately_suitable_crops']:
             print(f"\n{crop['crop']}:")
@@ -354,7 +354,7 @@ def main():
             print(f"Suitable Seasons: {', '.join(crop['details']['suitable_seasons'])}")
             print(f"Preferred Irrigation: {crop['details']['preferred_irrigation']}")
     else:
-        print("No moderately suitable crops found for this location and season")
+        print("[bold cyan]No moderately suitable crops found for this location and season[/bold cyan]")
 
 if __name__ == "__main__":
     main()

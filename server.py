@@ -12,7 +12,7 @@ logging.basicConfig(
 )
 
 #  badal de ye, ports sabki unique rakhio
-DB_FILE = "soil_types.db"
+DB_FILE = "database/macro_nutrients.db"
 ZMQ_PORT = 5555
 
 def log_message(message):

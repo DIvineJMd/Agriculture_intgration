@@ -186,7 +186,7 @@ def main():
     micro_conn.close()
     target_conn.close()
     
-    print("Soil health data transformation completed successfully!")
+    print("[bold yellow]Soil health data transformation completed successfully![/bold yellow]")
 
 if __name__ == "__main__":
     main()
