@@ -196,7 +196,7 @@ def get_crop_price_trends(state, crop):
 
 def get_irrigation_data(state):
     """Get irrigation availability data"""
-    conn = sqlite3.connect('Transformed_database/irrigation_transformed.db')
+    conn = sqlite3.connect('Transformed_database/irrigation_transformed.db') # 
     
     df = pd.read_sql_query("""
         SELECT *

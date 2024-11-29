@@ -19,7 +19,7 @@ class QueryHistory:
         """Add a query to the history"""
         if timestamp is None:
             timestamp = datetime.now()
-            
+                
         query_record = {
             "timestamp": timestamp,
             "question": question,
@@ -99,7 +99,7 @@ class NvidiaLLMQueryGenerator:
         # Initialize NVIDIA API client
         self.client = OpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
-            api_key="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"
+            api_key="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"
         )
 
         self.table_schemas = self._load_table_schemas()
