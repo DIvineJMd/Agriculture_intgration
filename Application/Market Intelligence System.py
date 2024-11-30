@@ -1,530 +1,444 @@
 import sqlite3
 import pandas as pd
-from datetime import datetime, timedelta
 import numpy as np
-from geopy.geocoders import Nominatim
+import os
 from rich.console import Console
 
 console = Console()
 
-def get_price_trends(crop, state, months=6):
-    """Get historical price trends and statistics aggregated for entire state"""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
-    
-    query = """
-    SELECT 
-        arrival_date,
-        AVG(price_per_quintal) as price_per_quintal,
-        AVG(monthly_avg_price) as monthly_avg_price,
-        AVG(price_trend_indicator) as price_trend_indicator,
-        AVG(seasonal_index) as seasonal_index,
-        AVG(price_volatility) as price_volatility,
-        COUNT(DISTINCT district) as district_count
-    FROM transformed_crop_prices
-    WHERE LOWER(commodity) = LOWER(?) 
-    AND LOWER(state) = LOWER(?)
-    GROUP BY arrival_date
-    ORDER BY arrival_date DESC 
-    LIMIT ?
-    """
-    
-    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
-    conn.close()
-    
-    if df.empty:
-        print(f"Warning: No data found for {crop} in {state}")
-        return None
-    
-    result = {
-        'current_price': df['price_per_quintal'].iloc[0],
-        'avg_price': df['monthly_avg_price'].mean(),
-        'price_trend': df['price_trend_indicator'].mean(),
-        'volatility': df['price_volatility'].mean(),
-        'seasonal_strength': df['seasonal_index'].std(),
-        'price_range': {
-            'min': df['price_per_quintal'].min(),
-            'max': df['price_per_quintal'].max()
-        },
-        'district_coverage': df['district_count'].iloc[0]
-    }
-    
-    return result
+class CropRecommendationSystem:
+    def __init__(self):
+        """Initialize the crop recommendation system"""
+        self.db_path = "WareHouse"
+        self.crop_requirements = self._load_crop_requirements()
+    def _load_crop_requirements(self):
+        """Load crop requirements from the database"""
+        try:
+            # Connect to the transformed database
+            conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
+            
+            # Get data from transformed_crop_data table
+            query = "SELECT * FROM transformed_crop_data"
+            crop_data = pd.read_sql_query(query, conn)
+            conn.close()
+            
+            if crop_data.empty:
+                print("Warning: No crop data found in database")
+                return {}
+            
+            # Group by label to get ranges
+            requirements = {}
+            for label in crop_data['label'].unique():
+                crop_subset = crop_data[crop_data['label'] == label]
+                
+                # Calculate mean values for each nutrient
+                n_mean = crop_subset['N'].mean()
+                p_mean = crop_subset['P'].mean()
+                k_mean = crop_subset['K'].mean()
+                rainfall_mean = crop_subset['rainfall'].mean()
+                ph_mean = crop_subset['ph'].mean()
+                
+                # Calculate ranges (±20% from mean)
+                requirements[label] = {
+                    'water_need': float(rainfall_mean),
+                    'preferred_irrigation': self._get_default_irrigation(float(rainfall_mean)),
+                    'N': (float(n_mean * 0.8), float(n_mean * 1.2)),
+                    'P': (float(p_mean * 0.8), float(p_mean * 1.2)),
+                    'K': (float(k_mean * 0.8), float(k_mean * 1.2)),
+                    'pH_category': self._get_ph_categories(float(ph_mean)),
+                    'seasons': self._get_default_seasons(label)
+                }
+            
+            return requirements
+            
+        except sqlite3.Error as e:
+            print(f"Database error: {e}")
+            return {}
+        except Exception as e:
+            print(f"Error loading crop requirements: {e}")
+            return {}
+    def _get_ph_categories(self, ph_value):
+        """Determine pH categories based on pH value"""
+        try:
+            # Convert ph_value to float
+            ph_value = float(ph_value)
+            
+            if ph_value < 5.5:
+                return ['Strongly Acidic', 'Moderately Acidic']
+            elif ph_value < 6.5:
+                return ['Slightly Acidic', 'Neutral']
+            elif ph_value < 7.5:
+                return ['Neutral']
+            elif ph_value < 8.5:
+                return ['Neutral', 'Slightly Alkaline']
+            else:
+                return ['Slightly Alkaline', 'Moderately Alkaline']
+        except (ValueError, TypeError):
+            print(f"Warning: Invalid pH value: {ph_value}, defaulting to Neutral")
+            return ['Neutral']
+    def _get_default_irrigation(self, water_need):
+        """Determine default irrigation method based on water needs"""
+        if water_need > 800:
+            return 'Flood'
+        elif water_need > 500:
+            return 'Sprinkler'
+        else:
+            return 'Drip'
+    def _get_default_seasons(self, crop):
+        """Default season mapping based on crop type."""
+        # Defining crops for different seasons
+        kharif_crops = [
+            'rice', 'maize', 'cotton', 'sugarcane', 'sorghum', 
+            'bajra', 'soybean', 'groundnut', 'pulses', 'millet'
+        ]
+        rabi_crops = [
+            'wheat', 'chickpea', 'mustard', 'barley', 'peas', 
+            'linseed', 'oats', 'lentils', 'gram', 'sunflower'
+        ]
+        zaid_crops = [
+            'watermelon', 'muskmelon', 'cucumber', 'pumpkin', 
+            'fodder', 'summer maize', 'cowpea', 'okra', 'tomato'
+        ]
+        # Convert crop to lowercase for case-insensitive comparison
+        crop = crop.lower()
+        
+        # Check which seasons the crop belongs to
+        seasons = []
+        if crop in kharif_crops:
+            seasons.append('Kharif')
+        if crop in rabi_crops:
+            seasons.append('Rabi')
+        if crop in zaid_crops:
+            seasons.append('Zaid')
+        # If no specific season, assume it can grow in all major seasons
+        return seasons if seasons else ['Kharif', 'Rabi', 'Zaid']
+    def get_soil_health_data(self, state):
+        """Get aggregated soil health data for the state"""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/soil_health_transformed.db')
+            query = """
+            SELECT 
+                AVG(nitrogen_level) as nitrogen_level,
+                AVG(phosphorous_level) as phosphorous_level,
+                AVG(potassium_level) as potassium_level,
+                AVG(ph_level) as ph_level,
+                AVG(organic_carbon_level) as organic_carbon_level,
+                AVG(micro_score) as micro_score,
+                AVG(overall_soil_health_score) as overall_soil_health_score,
+                state,
+                GROUP_CONCAT(DISTINCT district) as districts
+            FROM soil_health
+            WHERE state = ?
+            GROUP BY state
+            """
+            soil_data = pd.read_sql_query(query, conn, params=[state])
+            conn.close()
+            return soil_data.iloc[0] if not soil_data.empty else None
+        except Exception as e:
+            print(f"Error fetching soil health data: {e}")
+            return None
+    def get_irrigation_data(self, location, soil_data):
+        """Get irrigation availability data"""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/irrigation_transformed.db')
+            query = """
+            SELECT 
+                total_irrigated_area,
+                irrigation_coverage_ratio,
+                water_source_diversity_score,
+                canal_percentage,
+                tank_percentage,
+                tubewell_percentage
+            FROM transformed_irrigation
+            WHERE state = ?
+            """
+            irrigation_data = pd.read_sql_query(query, conn, params=[soil_data['state']])
+            conn.close()
+            return irrigation_data.iloc[0] if not irrigation_data.empty else None
+        except Exception as e:
+            print(f"Error fetching irrigation data: {e}")
+            return None
+    def calculate_soil_suitability(self, soil_data, crop):
+        """Calculate soil suitability score for a crop"""
+        if crop not in self.crop_requirements:
+            return 0.5
 
-def get_soil_suitability(crop, state):
-    """Analyze soil suitability for the crop"""
-    try:
-        conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
-        query = """
-        SELECT 
-            AVG(nitrogen_level) as nitrogen_level,
-            AVG(phosphorous_level) as phosphorous_level,
-            AVG(potassium_level) as potassium_level,
-            AVG(organic_carbon_level) as organic_carbon_level,
-            AVG(npk_score) as npk_score,
-            AVG(micro_score) as micro_score,
-            AVG(overall_soil_health_score) as overall_soil_health_score,
-            GROUP_CONCAT(DISTINCT district) as districts,
-            GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
-            GROUP_CONCAT(DISTINCT ec_level) as ec_levels
-        FROM soil_health
-        WHERE LOWER(state) = LOWER(?)
-        GROUP BY state
-        """
+        requirements = self.crop_requirements[crop]
         
-        df = pd.read_sql_query(query, conn, params=[state])
-        conn.close()
+        try:
+            # Convert percentage values to appropriate ranges
+            # NPK values in soil_data are in percentage (0-100)
+            n_value = float(soil_data['nitrogen_level'])
+            p_value = float(soil_data['phosphorous_level'])
+            k_value = float(soil_data['potassium_level'])
+            ph_value = float(soil_data['ph_level'])
+            
+            # Calculate NPK scores with wider acceptable ranges
+            n_score = self._calculate_range_score(n_value, requirements['N'], tolerance=0.5)
+            p_score = self._calculate_range_score(p_value, requirements['P'], tolerance=0.5)
+            k_score = self._calculate_range_score(k_value, requirements['K'], tolerance=0.5)
+            
+            # Calculate pH score
+            ph_categories = self._get_ph_categories(ph_value)
+            ph_score = self._calculate_ph_score(ph_categories[0], requirements['pH_category'])
+            
+            # Weight the scores (NPK: 90%, pH: 10%)
+            final_score = (n_score * 0.3 + p_score * 0.3 + k_score * 0.3 + ph_score * 0.1)
+            
+            return final_score
+            
+        except (ValueError, TypeError, KeyError) as e:
+            print(f"Warning: Error calculating soil suitability: {e}")
+            return 0.5
+    def calculate_irrigation_suitability(self, irrigation_data, crop):
+        """Calculate irrigation suitability score"""
+        if irrigation_data is None:
+            return 0.5
+        requirements = self.crop_requirements[crop]
+        water_need = requirements['water_need']
         
-        if df.empty:
-            print(f"Warning: No soil data found for {state}")
-            return {
-                'soil_health_score': 50.0,
-                'npk_status': 50.0,
-                'ph_level': 'Neutral',
-                'ec_level': 'Non Saline',
-                'suitability_score': 50.0,
-                'districts': 'No data'
+        # Calculate water availability score
+        coverage_score = min(1.0, irrigation_data['irrigation_coverage_ratio'] / 100)
+        
+        # Calculate water source suitability
+        preferred = requirements['preferred_irrigation']
+        source_scores = {
+            'Flood': irrigation_data['canal_percentage'] + irrigation_data['tank_percentage'],
+            'Sprinkler': irrigation_data['tubewell_percentage'],
+            'Drip': irrigation_data['tubewell_percentage']
+        }
+        source_score = min(1.0, source_scores[preferred] / 100)
+        
+        # Combined irrigation score
+        irrigation_score = (coverage_score * 0.6 + source_score * 0.4)
+        
+        return irrigation_score
+    def _calculate_range_score(self, value, optimal_range, tolerance=0.5):
+        """Calculate score based on optimal range with tolerance"""
+        min_val, max_val = optimal_range
+        range_width = max_val - min_val
+        
+        # Extend the acceptable range by the tolerance factor
+        extended_min = min_val - (range_width * tolerance)
+        extended_max = max_val + (range_width * tolerance)
+        
+        if extended_min <= value <= extended_max:
+            if min_val <= value <= max_val:
+                return 1.0
+            else:
+                # Calculate partial score based on distance from optimal range
+                distance = min(abs(value - min_val), abs(value - max_val))
+                return max(0.5, 1 - (distance / (range_width * tolerance)))
+        return max(0.2, 1 - (min(abs(value - extended_min), abs(value - extended_max)) / (range_width * 2)))
+    def _calculate_ph_score(self, ph_category, optimal_categories):
+        """Calculate pH score based on categorical values"""
+        ph_scores = {
+            'Strongly Acidic': 1,
+            'Moderately Acidic': 2,
+            'Slightly Acidic': 3,
+            'Neutral': 4,
+            'Slightly Alkaline': 3,
+            'Moderately Alkaline': 2,
+            'Strongly Alkaline': 1
+        }
+        
+        current_score = ph_scores.get(ph_category, 0)
+        optimal_scores = [ph_scores.get(cat, 0) for cat in optimal_categories]
+        
+        if ph_category in optimal_categories:
+            return 1.0
+        
+        min_distance = min(abs(current_score - opt_score) for opt_score in optimal_scores)
+        return max(0, 1 - (min_distance / 3))
+    def get_crop_recommendations(self, season=None):
+        """Get comprehensive crop recommendations"""
+        try:
+            # Connect to get soil health data
+            conn = sqlite3.connect(f'{self.db_path}/soil_health_transformed.db')
+            query = """
+            SELECT 
+                AVG(nitrogen_level) as nitrogen_level,
+                AVG(phosphorous_level) as phosphorous_level,
+                AVG(potassium_level) as potassium_level,
+                AVG(ph_level) as ph_level,
+                AVG(overall_soil_health_score) as overall_soil_health_score,
+                state,
+                GROUP_CONCAT(DISTINCT district) as districts
+            FROM soil_health
+            GROUP BY state
+            """
+            soil_data = pd.read_sql_query(query, conn)
+            conn.close()
+            
+            if soil_data.empty:
+                return {"error": "No soil health data found"}
+            
+            soil_data = soil_data.iloc[0]  # Get first state's data
+            
+            recommendations = {
+                'highly_suitable_crops': [],
+                'moderately_suitable_crops': [],
+                'location_details': {
+                    'state': soil_data['state'],
+                    'districts': soil_data['districts'],
+                    'soil_health_score': soil_data['overall_soil_health_score'],
+                    'npk_levels': f"N:{soil_data['nitrogen_level']:.1f}, "
+                                f"P:{soil_data['phosphorous_level']:.1f}, "
+                                f"K:{soil_data['potassium_level']:.1f}"
+                }
             }
-        
-        # Calculate NPK status
-        npk_status = df['npk_score'].iloc[0]
-        
-        # Get most common pH and EC levels
-        ph_levels = df['ph_levels'].iloc[0].split(',')
-        ec_levels = df['ec_levels'].iloc[0].split(',')
-        
-        return {
-            'soil_health_score': df['overall_soil_health_score'].iloc[0],
-            'npk_status': npk_status,
-            'ph_level': max(set(ph_levels), key=ph_levels.count),
-            'ec_level': max(set(ec_levels), key=ec_levels.count),
-            'suitability_score': df['overall_soil_health_score'].iloc[0] * 0.8,
-            'districts': df['districts'].iloc[0]
-        }
-        
-    except Exception as e:
-        print(f"Warning: Error getting soil data - {str(e)}")
-        return {
-            'soil_health_score': 50.0,
-            'npk_status': 50.0,
-            'ph_level': 'Neutral',
-            'ec_level': 'Non Saline',
-            'suitability_score': 50.0,
-            'districts': 'Error getting data'
-        }
-
-def get_irrigation_status(state):
-    """Get irrigation availability and infrastructure details"""
-    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
-    
-    # Normalize state name
-    state = state.title()
-    
-    query = """
-    SELECT 
-        total_irrigated_area,
-        irrigation_coverage_ratio,
-        irrigation_growth_rate,
-        water_source_diversity_score
-    FROM transformed_irrigation
-    WHERE LOWER(state) = LOWER(?)
-    ORDER BY year DESC
-    LIMIT 1
-    """
-    
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        print(f"Warning: No irrigation data found for {state}")
-        return None
-    
-    return {
-        'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
-        'growth_trend': df['irrigation_growth_rate'].iloc[0],
-        'water_availability_score': df['water_source_diversity_score'].iloc[0]
-    }
-
-def get_market_insights(crop, state):
-    """Comprehensive market intelligence analysis"""
-    
-    # Get price trends
-    price_data = get_price_trends(crop, state)
-    if not price_data:
-        price_data = {
-            'current_price': 0.0,
-            'avg_price': 0.0,
-            'price_trend': 0.0,
-            'volatility': 0.0,
-            'seasonal_strength': 1.0,
-            'price_range': {'min': 0.0, 'max': 0.0}
-        }
-        print(f"Warning: No price data available for {crop} in {state}")
-    
-    # Get soil suitability
-    soil_data = get_soil_suitability(crop, state)
-    if not soil_data:
-        soil_data = {
-            'soil_health_score': 50.0,
-            'npk_status': 50.0,
-            'ph_level': 'Neutral',
-            'ec_level': 'Non Saline',
-            'suitability_score': 50.0
-        }
-        print(f"Warning: No soil data available for {state}")
-    
-    # Get irrigation status
-    irrigation_data = get_irrigation_status(state)
-    if not irrigation_data:
-        irrigation_data = {
-            'irrigation_coverage': 50.0,
-            'growth_trend': 0.0,
-            'water_availability_score': 50.0
-        }
-        print(f"Warning: No irrigation data available for {state}")
-    
-    # Calculate market risk score (0-100)
-    market_risk = calculate_market_risk(price_data, soil_data, irrigation_data)
-    
-    # Generate price forecast
-    price_forecast = generate_price_forecast(price_data)
-    
-    # Determine best selling periods
-    selling_periods = determine_selling_periods(price_data)
-    
-    # Generate recommendations
-    recommendations = generate_recommendations(
-        price_data, soil_data, irrigation_data, market_risk
-    )
-    
-    return {
-        'market_summary': {
-            'current_price': price_data['current_price'],
-            'price_trend': price_data['price_trend'],
-            'market_risk_score': market_risk,
-            'soil_suitability': soil_data['suitability_score']
-        },
-        'price_forecast': price_forecast,
-        'best_selling_periods': selling_periods,
-        'recommendations': recommendations,
-        'detailed_metrics': {
-            'price_metrics': price_data,
-            'soil_metrics': soil_data,
-            'irrigation_metrics': irrigation_data
-        }
-    }
-
-def calculate_market_risk(price_data, soil_data, irrigation_data):
-    """Calculate overall market risk score"""
-    risk_score = 100
-    
-    # Price volatility impact (higher volatility = higher risk)
-    risk_score -= price_data['volatility'] * 20
-    
-    # Soil suitability impact (lower suitability = higher risk)
-    risk_score -= (100 - soil_data['suitability_score']) * 0.3
-    
-    # Irrigation availability impact
-    risk_score -= (100 - irrigation_data['water_availability_score']) * 0.2
-    
-    return max(min(risk_score, 100), 0)  # Ensure score is between 0-100
-
-def generate_price_forecast(price_data):
-    """Generate price forecasts based on trends"""
-    current_price = price_data['current_price']
-    trend = price_data['price_trend']
-    volatility = price_data['volatility']
-    
-    return {
-        'short_term': {
-            'price': current_price * (1 + trend),
-            'range': {
-                'low': current_price * (1 + trend - volatility),
-                'high': current_price * (1 + trend + volatility)
-            }
-        },
-        'long_term': {
-            'price': current_price * (1 + trend * 2),
-            'confidence': 'medium' if volatility < 0.2 else 'low'
-        }
-    }
-
-def determine_selling_periods(price_data):
-    """Determine optimal selling periods based on seasonal patterns"""
-    seasonal_strength = price_data['seasonal_strength']
-    
-    if seasonal_strength > 1.2:
-        return ['Peak season (based on historical data)']
-    elif seasonal_strength > 1.1:
-        return ['Multiple favorable periods throughout the year']
-    else:
-        return ['No strong seasonal pattern - monitor market conditions']
-
-def generate_recommendations(price_data, soil_data, irrigation_data, market_risk):
-    """Generate actionable recommendations"""
-    recommendations = []
-    
-    # Price-based recommendations
-    if price_data['volatility'] > 0.2:
-        recommendations.append("Consider forward contracts to manage price risk")
-    if price_data['seasonal_strength'] > 1.2:
-        recommendations.append("Plan storage for peak price periods")
-    
-    # Soil-based recommendations
-    if soil_data['suitability_score'] < 70:
-        recommendations.append("Invest in soil improvement before increasing production")
-    
-    # Risk-based recommendations
-    if market_risk < 60:
-        recommendations.append("Diversify crop portfolio to manage risk")
-    
-    # Irrigation-based recommendations
-    if irrigation_data['water_availability_score'] < 50:
-        recommendations.append("Consider drought-resistant varieties")
-    
-    return recommendations
-
-def get_location_crop_statistics(state):
-    """Get aggregated price statistics for all crops in state"""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
-    
-    query = """
-    SELECT 
-        commodity as crop,
-        COUNT(*) as total_records,
-        COUNT(DISTINCT district) as district_count,
-        ROUND(AVG(price_per_quintal), 2) as avg_price,
-        ROUND(MIN(price_per_quintal), 2) as min_price,
-        ROUND(MAX(price_per_quintal), 2) as max_price,
-        ROUND(AVG(price_volatility) * 100, 1) as avg_volatility,
-        ROUND(AVG(seasonal_index), 2) as seasonal_index
-    FROM transformed_crop_prices
-    WHERE LOWER(state) = LOWER(?)
-    GROUP BY commodity
-    ORDER BY avg_price DESC
-    """
-    
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        print(f"No crop data found for {state}")
-        return None
-    
-    return df
-
-def get_available_crops(state):
-    """Get list of crops with available price data"""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
-    
-    query = """
-    SELECT DISTINCT commodity
-    FROM transformed_crop_prices
-    WHERE LOWER(state) = LOWER(?)
-    """
-    params = [state]
-    
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    
-    return df['commodity'].tolist() if not df.empty else []
-
-def print_location_analysis(state):
-    """Print comprehensive state-level crop analysis"""
-    print("\nState-wide Crop Market Analysis Report")
-    print("=" * 50)
-    print(f"State: {state}")
-    
-    # Get available crops first
-    available_crops = get_available_crops(state)
-    if not available_crops:
-        print(f"\nNo crop price data available for {state}")
-        return
-    
-    print(f"\nTotal Crops Analyzed: {len(available_crops)}")
-    
-    # Get crop statistics and market insights for each crop
-    stats = get_location_crop_statistics(state)
-    
-    if stats is None:
-        return
-        
-    # Print state-wide metrics
-    soil_data = get_soil_suitability(None, state)
-    irrigation_data = get_irrigation_status(state)
-    
-    print("\nState-wide Agricultural Metrics")
-    print("-" * 40)
-    if soil_data:
-        print("\nSoil Health Summary:")
-        print(f"- Overall Soil Health: {soil_data['soil_health_score']:.1f}/100")
-        print(f"- NPK Status: {soil_data['npk_status']:.1f}/100")
-        print(f"- Predominant pH Level: {soil_data['ph_level']}")
-        print(f"- Predominant EC Level: {soil_data['ec_level']}")
-    
-    if irrigation_data:
-        print("\nIrrigation Infrastructure:")
-        print(f"- State Coverage: {irrigation_data['irrigation_coverage']:.1f}%")
-        print(f"- Growth Trend: {irrigation_data['growth_trend']:.1f}%")
-        print(f"- Water Availability: {irrigation_data['water_availability_score']:.1f}/100")
-    
-    print("\nCrop-wise Market Analysis")
-    print("=" * 50)
-    
-    # Analyze each crop
-    for _, row in stats.iterrows():
-        crop = row['crop']
-        print(f"\n{crop}")
-        print("-" * len(crop))
-        
-        console.print(f"[bold yellow]Market Coverage: {row['district_count']} districts[/bold yellow]")
-        
-        # Price Statistics
-        print("\nPrice Statistics (State Average):")
-        print(f"- Average Price: ₹{row['avg_price']:,.2f} per quintal")
-        print(f"- Price Range: ₹{row['min_price']:,.2f} - ₹{row['max_price']:,.2f}")
-        print(f"- Price Volatility: {row['avg_volatility']}%")
-        print(f"- Seasonal Index: {row['seasonal_index']:.2f}")
-        print(f"- Total Market Records: {row['total_records']}")
-        
-        # Get detailed market insights
-        insights = get_market_insights(crop, state)
-        if insights:
-            console.print("\n[bold cyan]Market Intelligence:[/bold cyan]")
-            print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
-            print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             
-            forecast = insights['price_forecast']['short_term']
-            print(f"\nState-wide Price Forecast:")
-            print(f"- Expected Range: ₹{forecast['range']['low']:,.2f} - ₹{forecast['range']['high']:,.2f}")
+            for crop in self.crop_requirements:
+                if season and season not in self._get_default_seasons(crop):
+                    continue
+                    
+                soil_score = self.calculate_soil_suitability(soil_data, crop)
+                water_req = self.crop_requirements[crop]['water_need']
+                
+                # Simplified irrigation score based on water requirement
+                irrigation_score = 0.7  # Default moderate score
+                
+                final_score = (soil_score * 0.7 + irrigation_score * 0.3)
+                
+                crop_info = {
+                    'crop': crop,
+                    'final_score': final_score,
+                    'details': {
+                        'soil_score': soil_score,
+                        'irrigation_score': irrigation_score,
+                        'water_requirement': water_req,
+                        'suitable_seasons': self._get_default_seasons(crop),
+                        'preferred_irrigation': self._get_default_irrigation(water_req)
+                    }
+                }
+                
+                # Adjusted thresholds for recommendations
+                if final_score >= 0.4:  # Further lowered threshold
+                    recommendations['highly_suitable_crops'].append(crop_info)
+                elif final_score >= 0.2:  # Further lowered threshold
+                    recommendations['moderately_suitable_crops'].append(crop_info)
             
-            print("\nMarket Timing:")
-            for period in insights['best_selling_periods']:
-                print(f"- {period}")
+            # Sort recommendations by final score
+            for category in ['highly_suitable_crops', 'moderately_suitable_crops']:
+                recommendations[category].sort(key=lambda x: x['final_score'], reverse=True)
             
-            console.print("[bold green]\nStrategic Recommendations:[/bold green]")
-            for rec in insights['recommendations']:
-                print(f"- {rec}")
-        
-        print("\n" + "="*50)
-
-def get_price_trends(crop, state, months=6):
-    """Retrieve historical price trends and statistics for a crop in a state."""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
-    query = """
-    SELECT 
-        arrival_date,
-        AVG(price_per_quintal) as price_per_quintal,
-        AVG(monthly_avg_price) as monthly_avg_price,
-        AVG(price_trend_indicator) as price_trend_indicator,
-        AVG(seasonal_index) as seasonal_index,
-        AVG(price_volatility) as price_volatility,
-        COUNT(DISTINCT district) as district_count
-    FROM transformed_crop_prices
-    WHERE LOWER(commodity) = LOWER(?) 
-    AND LOWER(state) = LOWER(?)
-    GROUP BY arrival_date
-    ORDER BY arrival_date DESC 
-    LIMIT ?
-    """
-    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No data found for {crop} in {state}")
-        return None
-    
-    result = {
-        'current_price': df['price_per_quintal'].iloc[0],
-        'avg_price': df['monthly_avg_price'].mean(),
-        'price_trend': df['price_trend_indicator'].mean(),
-        'volatility': df['price_volatility'].mean(),
-        'seasonal_strength': df['seasonal_index'].std(),
-        'price_range': {
-            'min': df['price_per_quintal'].min(),
-            'max': df['price_per_quintal'].max()
-        },
-        'district_coverage': df['district_count'].iloc[0]
-    }
-    return result
-
-def get_soil_suitability(state):
-    """Analyze soil suitability for crops in a state."""
-    conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
-    query = """
-    SELECT 
-        AVG(overall_soil_health_score) as overall_soil_health_score,
-        AVG(npk_score) as npk_score,
-        GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
-        GROUP_CONCAT(DISTINCT ec_level) as ec_levels
-    FROM soil_health
-    WHERE LOWER(state) = LOWER(?)
-    GROUP BY state
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No soil data found for {state}")
-        return None
-    
-    ph_levels = df['ph_levels'].iloc[0].split(',')
-    ec_levels = df['ec_levels'].iloc[0].split(',')
-    
-    return {
-        'soil_health_score': df['overall_soil_health_score'].iloc[0],
-        'npk_status': df['npk_score'].iloc[0],
-        'ph_level': max(set(ph_levels), key=ph_levels.count),
-        'ec_level': max(set(ec_levels), key=ec_levels.count)
-    }
-
-def get_irrigation_status(state):
-    """Retrieve irrigation availability and infrastructure details."""
-    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
-    query = """
-    SELECT 
-        irrigation_coverage_ratio,
-        water_source_diversity_score
-    FROM transformed_irrigation
-    WHERE LOWER(state) = LOWER(?)
-    ORDER BY year DESC
-    LIMIT 1
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No irrigation data found for {state}")
-        return None
-    
-    return {
-        'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
-        'water_availability_score': df['water_source_diversity_score'].iloc[0]
-    }
-
-def get_location_details(lat, lon):
-    """Get location details from latitude and longitude"""
-    geolocator = Nominatim(user_agent="IIA")
-    location = geolocator.reverse(f"{lat},{lon}")
-    state = location.raw['address'].get('state')
-    district = location.raw['address'].get('state_district')
-    return location.address, state, district
-
+            return recommendations
+            
+        except Exception as e:
+            print(f"Error getting recommendations: {e}")
+            return {"error": str(e)}
+    def _load_crop_data(self):
+        """Load crop data from the database"""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
+            query = "SELECT * FROM crop_data"
+            crop_data = pd.read_sql_query(query, conn)
+            conn.close()
+            return crop_data
+        except Exception as e:
+            print(f"Error loading crop data: {e}")
+            return pd.DataFrame()
+    def get_location(self):
+        """Get and validate location input from user"""
+        try:
+            # Connect to the soil health database to get available states
+            conn = sqlite3.connect(f'{self.db_path}/soil_health_transformed.db')
+            cursor = conn.cursor()
+            
+            # Get all unique states
+            cursor.execute("SELECT DISTINCT state FROM soil_health ORDER BY state")
+            states = cursor.fetchall()
+            conn.close()
+            
+            if not states:
+                print("No states found in database")
+                return None
+            
+            # Print available states
+            print("\nAvailable States:")
+            for i, (state,) in enumerate(states, 1):
+                print(f"{i}. {state}")
+            
+            # Get user input
+            while True:
+                try:
+                    choice = int(input("\nEnter the number of your state (or 0 to exit): "))
+                    if choice == 0:
+                        return None
+                    if 1 <= choice <= len(states):
+                        return states[choice-1][0]  # Return the state name
+                    print("Invalid choice. Please try again.")
+                except ValueError:
+                    print("Please enter a valid number.")
+                
+        except Exception as e:
+            print(f"Error getting states: {e}")
+            return None
 def main():
-    # Example coordinates (Visakhapatnam)
-    lat, lon = 17.6868, 83.2185
+    # Initialize the system
+    recommender = CropRecommendationSystem()
     
-    # Get location details
-    address, state, _ = get_location_details(lat, lon)
-    if state is None:
-        print("Could not determine state location. Please check your connection.")
+    # Get season input
+    seasons = ['Kharif', 'Rabi', 'Zaid']
+    print("\nSeasons:")
+    for i, season in enumerate(seasons, 1):
+        print(f"{i}. {season}")
+    print("4. All seasons")
+    
+    while True:
+        try:
+            season_choice = int(input("\nEnter the number for season (or 0 to exit): "))
+            if season_choice == 0:
+                return
+            if season_choice == 4:
+                season = None
+                break
+            if 1 <= season_choice <= len(seasons):
+                season = seasons[season_choice-1]
+                break
+            print("Invalid choice. Please try again.")
+        except ValueError:
+            print("Please enter a valid number.")
+    
+    # Get recommendations
+    recommendations = recommender.get_crop_recommendations(season)
+    if "error" in recommendations:
+        print(f"Error: {recommendations['error']}")
         return
     
+    # Print recommendations
+    state = recommendations['location_details']['state']
+    print(f"\nCrop Recommendations for {state}")
     print(f"\nLocation Details:")
-    print(f"Address: {address}")
-    print(f"State: {state}")
+    for key, value in recommendations['location_details'].items():
+        print(f"{key.replace('_', ' ').title()}: {value}")
     
-    # Generate state-wide analysis
-    print_location_analysis(state)
+    console.print("\n[bold green]Highly Suitable Crops:[/bold green]")
+    if recommendations['highly_suitable_crops']:
+        for crop in recommendations['highly_suitable_crops']:
+            print(f"\n{crop['crop']}:")
+            print(f"Overall Suitability: {crop['final_score']:.2f}")
+            print(f"Soil Score: {crop['details']['soil_score']:.2f}")
+            print(f"Irrigation Score: {crop['details']['irrigation_score']:.2f}")
+            print(f"Water Requirement: {crop['details']['water_requirement']} mm")
+            print(f"Suitable Seasons: {', '.join(crop['details']['suitable_seasons'])}")
+            print(f"Preferred Irrigation: {crop['details']['preferred_irrigation']}")
+    else:
+        print("No highly suitable crops found for this season")
+    
+    console.print("\n[bold yellow]Moderately Suitable Crops:[/bold yellow]")
+    if recommendations['moderately_suitable_crops']:
+        for crop in recommendations['moderately_suitable_crops']:
+            print(f"\n{crop['crop']}:")
+            print(f"Overall Suitability: {crop['final_score']:.2f}")
+            print(f"Soil Score: {crop['details']['soil_score']:.2f}")
+            print(f"Irrigation Score: {crop['details']['irrigation_score']:.2f}")
+            print(f"Water Requirement: {crop['details']['water_requirement']} mm")
+            print(f"Suitable Seasons: {', '.join(crop['details']['suitable_seasons'])}")
+            print(f"Preferred Irrigation: {crop['details']['preferred_irrigation']}")
+    else:
+        console.print("[bold red]No moderately suitable crops found for this location and season[/bold red]")
 
+        print("No moderately suitable crops found for this season")
 if __name__ == "__main__":
     main()
