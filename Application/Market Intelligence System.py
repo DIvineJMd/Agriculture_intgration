@@ -407,6 +407,100 @@ def print_location_analysis(state):
         
         print("\n" + "="*50)
 
+def get_price_trends(crop, state, months=6):
+    """Retrieve historical price trends and statistics for a crop in a state."""
+    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
+    query = """
+    SELECT 
+        arrival_date,
+        AVG(price_per_quintal) as price_per_quintal,
+        AVG(monthly_avg_price) as monthly_avg_price,
+        AVG(price_trend_indicator) as price_trend_indicator,
+        AVG(seasonal_index) as seasonal_index,
+        AVG(price_volatility) as price_volatility,
+        COUNT(DISTINCT district) as district_count
+    FROM transformed_crop_prices
+    WHERE LOWER(commodity) = LOWER(?) 
+    AND LOWER(state) = LOWER(?)
+    GROUP BY arrival_date
+    ORDER BY arrival_date DESC 
+    LIMIT ?
+    """
+    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
+    conn.close()
+    
+    if df.empty:
+        console.print(f"[bold red]Warning:[/bold red] No data found for {crop} in {state}")
+        return None
+    
+    result = {
+        'current_price': df['price_per_quintal'].iloc[0],
+        'avg_price': df['monthly_avg_price'].mean(),
+        'price_trend': df['price_trend_indicator'].mean(),
+        'volatility': df['price_volatility'].mean(),
+        'seasonal_strength': df['seasonal_index'].std(),
+        'price_range': {
+            'min': df['price_per_quintal'].min(),
+            'max': df['price_per_quintal'].max()
+        },
+        'district_coverage': df['district_count'].iloc[0]
+    }
+    return result
+
+def get_soil_suitability(state):
+    """Analyze soil suitability for crops in a state."""
+    conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
+    query = """
+    SELECT 
+        AVG(overall_soil_health_score) as overall_soil_health_score,
+        AVG(npk_score) as npk_score,
+        GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
+        GROUP_CONCAT(DISTINCT ec_level) as ec_levels
+    FROM soil_health
+    WHERE LOWER(state) = LOWER(?)
+    GROUP BY state
+    """
+    df = pd.read_sql_query(query, conn, params=[state])
+    conn.close()
+    
+    if df.empty:
+        console.print(f"[bold red]Warning:[/bold red] No soil data found for {state}")
+        return None
+    
+    ph_levels = df['ph_levels'].iloc[0].split(',')
+    ec_levels = df['ec_levels'].iloc[0].split(',')
+    
+    return {
+        'soil_health_score': df['overall_soil_health_score'].iloc[0],
+        'npk_status': df['npk_score'].iloc[0],
+        'ph_level': max(set(ph_levels), key=ph_levels.count),
+        'ec_level': max(set(ec_levels), key=ec_levels.count)
+    }
+
+def get_irrigation_status(state):
+    """Retrieve irrigation availability and infrastructure details."""
+    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
+    query = """
+    SELECT 
+        irrigation_coverage_ratio,
+        water_source_diversity_score
+    FROM transformed_irrigation
+    WHERE LOWER(state) = LOWER(?)
+    ORDER BY year DESC
+    LIMIT 1
+    """
+    df = pd.read_sql_query(query, conn, params=[state])
+    conn.close()
+    
+    if df.empty:
+        console.print(f"[bold red]Warning:[/bold red] No irrigation data found for {state}")
+        return None
+    
+    return {
+        'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
+        'water_availability_score': df['water_source_diversity_score'].iloc[0]
+    }
+
 def get_location_details(lat, lon):
     """Get location details from latitude and longitude"""
     geolocator = Nominatim(user_agent="IIA")

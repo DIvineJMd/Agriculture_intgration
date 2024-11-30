@@ -349,6 +349,116 @@ def analyze_profit_potential(crop, state, district=None):
         'recommendations': recommendations
     }
 
+def _fetch_location_details(self, latitude, longitude):
+    """Fetch location details using latitude and longitude."""
+    try:
+        geolocator = Nominatim(user_agent="IIA_Location_Service")
+        location = geolocator.reverse(f"{latitude},{longitude}")
+        state = location.raw['address'].get('state')
+        district = location.raw['address'].get('state_district', None)
+        return {
+            'address': location.address,
+            'state': state,
+            'district': district
+        }
+    except Exception as e:
+        console.print(f"[bold red]Error fetching location details: {e}[/bold red]")
+        return {
+            'address': None,
+            'state': None,
+            'district': None
+        }
+
+def _fetch_soil_health(self, state, district=None):
+    """Retrieve soil health data based on the provided state and district."""
+    try:
+        conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
+        query = """
+        SELECT 
+            nitrogen_level, phosphorous_level, potassium_level,
+            organic_carbon_level, ph_level, ec_level, npk_score,
+            micro_score, overall_soil_health_score
+        FROM soil_health
+        WHERE LOWER(state) = LOWER(?)
+        """
+        params = [state]
+        if district:
+            query += " AND LOWER(district) = LOWER(?)"
+            params.append(district)
+        query += " GROUP BY state"
+        
+        soil_data = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+
+        if soil_data.empty:
+            return None
+
+        return {
+            'overall_soil_health_score': soil_data['overall_soil_health_score'].mean(),
+            'npk_score': soil_data['npk_score'].mean(),
+            'micro_score': soil_data['micro_score'].mean(),
+            'ph_level': soil_data['ph_level'].iloc[0],
+            'ec_level': soil_data['ec_level'].iloc[0]
+        }
+    except Exception as e:
+        console.print(f"[bold red]Error retrieving soil health data: {e}[/bold red]")
+        return None
+
+def _fetch_weather_conditions(self, state, district=None):
+    """Retrieve weather conditions for the last 30 days, including historical and forecasted data."""
+    try:
+        conn = sqlite3.connect('WareHouse/weather_data.db')
+        district_filter = "AND LOWER(district) = LOWER(?)" if district else ""
+        query = f"""
+        WITH recent_weather AS (
+            SELECT 
+                temperature_max, temperature_min, humidity_avg,
+                COALESCE(precipitation_sum, 0) as total_precipitation,
+                soil_moisture_surface, soil_moisture_deep,
+                soil_temperature_surface, soil_temperature_deep,
+                wind_speed_max, evapotranspiration,
+                growing_condition_score, is_forecast, date
+            FROM transformed_weather
+            WHERE LOWER(state) = LOWER(?)
+            {district_filter}
+            AND date >= date('now', '-30 days')
+        )
+        SELECT 
+            AVG(CASE WHEN is_forecast = 0 THEN temperature_max END) as historical_temp_max,
+            AVG(CASE WHEN is_forecast = 0 THEN temperature_min END) as historical_temp_min,
+            AVG(CASE WHEN is_forecast = 0 THEN humidity_avg END) as historical_humidity,
+            SUM(CASE WHEN is_forecast = 0 THEN total_precipitation END) as historical_precipitation,
+            AVG(CASE WHEN is_forecast = 0 THEN soil_moisture_surface END) as historical_moisture_surface,
+            AVG(CASE WHEN is_forecast = 1 THEN temperature_max END) as forecast_temp_max,
+            AVG(CASE WHEN is_forecast = 1 THEN temperature_min END) as forecast_temp_min,
+            AVG(CASE WHEN is_forecast = 1 THEN humidity_avg END) as forecast_humidity,
+            SUM(CASE WHEN is_forecast = 1 THEN total_precipitation END) as forecast_precipitation,
+            AVG(growing_condition_score) as avg_growing_condition_score,
+            COUNT(*) as record_count
+        FROM recent_weather
+        """
+        params = [state, district] if district else [state]
+        weather_data = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+
+        if weather_data.empty or weather_data.iloc[0]['record_count'] == 0:
+            return None
+
+        # Consolidate results
+        row = weather_data.iloc[0]
+        return {
+            'temperature_max': row['historical_temp_max'] or row['forecast_temp_max'] or 30.0,
+            'temperature_min': row['historical_temp_min'] or row['forecast_temp_min'] or 20.0,
+            'humidity_avg': row['historical_humidity'] or row['forecast_humidity'] or 65.0,
+            'precipitation_sum': row['historical_precipitation'] + row['forecast_precipitation'] or 0.0,
+            'soil_moisture_surface': row['historical_moisture_surface'] or 0.4,
+            'growing_condition_score': row['avg_growing_condition_score'] or 50.0
+        }
+    except Exception as e:
+        console.print(f"[bold red]Error fetching weather data: {e}[/bold red]")
+        return None
+
+
 def main():
     # Get location details (example coordinates for Visakhapatnam)
     lat, lon = 17.6868, 83.2185
@@ -372,7 +482,7 @@ def main():
     # Print results
     console.print("[bold cyan]\nProfit Maximization Analysis Results:[/bold cyan]")
     print(f"Crop: {analysis['crop']}")
-    print(f"Location: {analysis['location']}")
+    # print(f"Location: {analysis['location']}")
     print(f"\nProfit Potential Score: {analysis['profit_potential_score']:.2f}/100")
     
     if analysis['risk_factors']:

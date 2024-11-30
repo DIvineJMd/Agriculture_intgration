@@ -264,6 +264,83 @@ class FertilizerRecommendationSystem:
             total_cost = sum(nutrient_requirements[nutrient] * base_cost[nutrient] 
                             for nutrient in ['N', 'P', 'K'])
             return round(total_cost, 2)
+        
+    def _get_high_effectiveness_fertilizers(self):
+        """Retrieve fertilizers with high effectiveness score."""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/fertilizer_recommendation.db')
+            query = """
+            SELECT 
+                recommended_fertilizer, 
+                n_ratio, 
+                p_ratio, 
+                k_ratio, 
+                application_rate, 
+                effectiveness_score
+            FROM fertilizer_recommendations
+            WHERE effectiveness_score >= 80
+            ORDER BY effectiveness_score DESC
+            """
+            fertilizer_data = pd.read_sql_query(query, conn)
+            conn.close()
+            return fertilizer_data
+        except Exception as e:
+            print(f"Error retrieving high-effectiveness fertilizers: {e}")
+            return pd.DataFrame()
+    
+    def _get_cost_efficient_fertilizers(self):
+        """Retrieve fertilizers optimized for cost-efficiency."""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/fertilizer_recommendation.db')
+            query = """
+            SELECT 
+                recommended_fertilizer, 
+                n_ratio, 
+                p_ratio, 
+                k_ratio, 
+                application_rate, 
+                effectiveness_score,
+                (effectiveness_score / application_rate) AS cost_efficiency
+            FROM fertilizer_recommendations
+            WHERE effectiveness_score >= 70
+            ORDER BY cost_efficiency DESC
+            """
+            fertilizer_data = pd.read_sql_query(query, conn)
+            conn.close()
+            return fertilizer_data
+        except Exception as e:
+            print(f"Error retrieving cost-efficient fertilizers: {e}")
+            return pd.DataFrame()
+
+    def _get_nutrient_specific_fertilizers(self):
+        """Retrieve fertilizers categorized by nutrient type."""
+        try:
+            conn = sqlite3.connect(f'{self.db_path}/fertilizer_recommendation.db')
+            query = """
+            SELECT 
+                recommended_fertilizer, 
+                n_ratio, 
+                p_ratio, 
+                k_ratio, 
+                application_rate, 
+                effectiveness_score,
+                CASE
+                    WHEN n_ratio > p_ratio AND n_ratio > k_ratio THEN 'Nitrogen-rich'
+                    WHEN p_ratio > n_ratio AND p_ratio > k_ratio THEN 'Phosphorous-rich'
+                    WHEN k_ratio > n_ratio AND k_ratio > p_ratio THEN 'Potassium-rich'
+                    ELSE 'Balanced'
+                END AS nutrient_type
+            FROM fertilizer_recommendations
+            ORDER BY effectiveness_score DESC
+            """
+            fertilizer_data = pd.read_sql_query(query, conn)
+            conn.close()
+            return fertilizer_data
+        except Exception as e:
+            print(f"Error retrieving nutrient-specific fertilizers: {e}")
+            return pd.DataFrame()
+
+
     @staticmethod
     def get_location_details(lat, lon):
         """Get location details from latitude and longitude"""
@@ -290,15 +367,15 @@ def main():
         return
         
     console.print(f"[bold blue]\nFertilizer Plan for {crop} in {location}[/bold blue]")
-    print("\nSoil Health:")
+    console.print("[bold green]\nSoil Health:[/bold green]")
     for nutrient, value in plan['soil_health'].items():
         print(f"{nutrient.capitalize()}: {value}")
         
-    print("\nNutrient Requirements (kg/ha):")
+    console.print("[bold yellow]\nNutrient Requirements (kg/ha):[/bold yellow]")
     for nutrient, value in plan['nutrient_requirements'].items():
         print(f"{nutrient}: {value:.1f}")
         
-    print("\nApplication Schedule:")
+    console.print("[bold cyan]\nApplication Schedule:[/bold cyan]")
     for stage in plan['application_schedule']:
         print(f"\n{stage['stage']}:")
         for nutrient, amount in stage['nutrients'].items():
