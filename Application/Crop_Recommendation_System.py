@@ -9,7 +9,7 @@ console = Console()
 class CropRecommendationSystem:
     def __init__(self):
         """Initialize the crop recommendation system"""
-        self.db_path = "WareHouse"
+        self.db_path = "oldcode"
         self.crop_requirements = self._load_crop_requirements()
     def _load_crop_requirements(self):
         """Load crop requirements from the database"""

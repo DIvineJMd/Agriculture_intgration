@@ -17,7 +17,7 @@ def get_location_details(lat, lon):
 
 def get_soil_health_data(state, district=None):
     """Get soil health data for location"""
-    conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
+    conn = sqlite3.connect('oldcode/soil_health_transformed.db')
     
     query = """
     SELECT 
@@ -65,7 +65,7 @@ def get_soil_health_data(state, district=None):
 
 def get_weather_conditions(state, district=None):
     """Get weather and soil conditions"""
-    conn = sqlite3.connect('WareHouse/weather_data.db')
+    conn = sqlite3.connect('oldcode/weather_data.db')
     
     # Normalize state name to match database
     state = state.title()
@@ -202,7 +202,7 @@ def calculate_growing_condition_score(weather_data):
 
 def get_irrigation_data(state):
     """Get irrigation availability data"""
-    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
+    conn = sqlite3.connect('oldcode/irrigation_transformed.db')
     
     query = """
     SELECT 
@@ -249,7 +249,7 @@ def get_irrigation_data(state):
 
 def get_crop_price_trends(state, crop):
     """Get historical crop price trends"""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
+    conn = sqlite3.connect('oldcode/crop_prices_transformed.db')
     
     query = """
     SELECT 
@@ -372,7 +372,7 @@ def _fetch_location_details(self, latitude, longitude):
 def _fetch_soil_health(self, state, district=None):
     """Retrieve soil health data based on the provided state and district."""
     try:
-        conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
+        conn = sqlite3.connect('oldcode/soil_health_transformed.db')
         query = """
         SELECT 
             nitrogen_level, phosphorous_level, potassium_level,
@@ -407,7 +407,7 @@ def _fetch_soil_health(self, state, district=None):
 def _fetch_weather_conditions(self, state, district=None):
     """Retrieve weather conditions for the last 30 days, including historical and forecasted data."""
     try:
-        conn = sqlite3.connect('WareHouse/weather_data.db')
+        conn = sqlite3.connect('oldcode/weather_data.db')
         district_filter = "AND LOWER(district) = LOWER(?)" if district else ""
         query = f"""
         WITH recent_weather AS (

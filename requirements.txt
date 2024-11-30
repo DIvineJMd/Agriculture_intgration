@@ -13,3 +13,4 @@ rich
 mysql
 openai
 dotenv
+geopy

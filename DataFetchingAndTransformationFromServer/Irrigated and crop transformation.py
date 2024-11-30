@@ -44,7 +44,7 @@ def validate_server_config():
 
 def create_transformed_databases():
     """Create separate transformed databases for crop and irrigation data"""
-    transform_dir = "WareHouse"
+    transform_dir = "oldcode"
     os.makedirs(transform_dir, exist_ok=True)
     
     # Create separate connections

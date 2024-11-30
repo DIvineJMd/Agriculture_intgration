@@ -73,11 +73,11 @@ def fetch_and_transform_soil_data():
             
         states_df = pd.DataFrame(states_data)
         
-        # Create WareHouse directory if it doesn't exist
-        os.makedirs('WareHouse', exist_ok=True)
+        # Create oldcode directory if it doesn't exist
+        os.makedirs('oldcode', exist_ok=True)
         
         # Connect to database
-        conn = sqlite3.connect('WareHouse/soil_types.db')
+        conn = sqlite3.connect('oldcode/soil_types.db')
         cursor = conn.cursor()
         
         # Create soil_types table
@@ -131,7 +131,7 @@ def fetch_and_transform_soil_data():
 def query_soil_types_by_state(state):
     """Helper function to query soil types for a specific state"""
     try:
-        conn = sqlite3.connect('WareHouse/soil_types.db')
+        conn = sqlite3.connect('oldcode/soil_types.db')
         cursor = conn.cursor()
         
         cursor.execute('''

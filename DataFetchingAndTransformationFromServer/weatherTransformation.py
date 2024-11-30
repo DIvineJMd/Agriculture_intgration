@@ -10,7 +10,7 @@ def create_transformed_database():
     # Create transformed_database directory if it doesn't exist
     os.makedirs('Transformed_database', exist_ok=True)
     
-    conn = sqlite3.connect('WareHouse/weather_data.db')
+    conn = sqlite3.connect('oldcode/weather_data.db')
     cursor = conn.cursor()
     
     # Create transformed weather table with combined metrics

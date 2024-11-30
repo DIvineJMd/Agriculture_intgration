@@ -85,7 +85,7 @@ class ChatHistory:
 class NvidiaLLMQueryGenerator:
     def __init__(self):
         """Initialize the Database Query Generator with NVIDIA's NeMo LLM"""
-        self.db_path = "WareHouse"
+        self.db_path = "oldcode"
         self.available_databases = {
             'crop_prices': 'crop_prices_transformed.db',
             'soil_health': 'soil_health_transformed.db',

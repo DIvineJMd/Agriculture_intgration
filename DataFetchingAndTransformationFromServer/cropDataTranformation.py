@@ -43,7 +43,7 @@ def fetch_and_transform_data():
         federator = DatabaseFederator(SERVERS)
         
         # Create transformed database directory if it doesn't exist
-        os.makedirs('WareHouse', exist_ok=True)
+        os.makedirs('oldcode', exist_ok=True)
         
         # Fetch data using federator
         query = "SELECT * FROM crop_data"
@@ -54,7 +54,7 @@ def fetch_and_transform_data():
             df = pd.DataFrame(data)
             
             # Connect to the transformed database
-            transformed_db = 'WareHouse/transformed_crop_data.db'
+            transformed_db = 'oldcode/transformed_crop_data.db'
             conn = sqlite3.connect(transformed_db)
             
             # Create table and save transformed data

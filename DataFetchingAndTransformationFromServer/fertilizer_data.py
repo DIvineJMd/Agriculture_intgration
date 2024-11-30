@@ -52,8 +52,8 @@ def get_server_config(db_name):
 
 def create_transformed_database():
     """Create and set up the transformed fertilizer database"""
-    # Create WareHouse directory if it doesn't exist
-    transform_dir = Path("WareHouse")
+    # Create oldcode directory if it doesn't exist
+    transform_dir = Path("oldcode")
     transform_dir.mkdir(exist_ok=True)
     
     conn = sqlite3.connect(transform_dir / 'fertilizer_recommendation.db')
@@ -245,7 +245,7 @@ def main():
     transform_fertilizer_data()
     
     # Example: Get recommendations from transformed database
-    conn = sqlite3.connect('WareHouse/fertilizer_recommendation.db')
+    conn = sqlite3.connect('oldcode/fertilizer_recommendation.db')
     recommendations = get_fertilizer_recommendations(conn)
     print("\nTop Fertilizer Recommendations:")
     print(recommendations.head())

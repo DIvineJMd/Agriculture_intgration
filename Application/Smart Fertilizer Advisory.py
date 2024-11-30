@@ -10,7 +10,7 @@ console = Console()
 class FertilizerRecommendationSystem:
     def __init__(self):
         """Initialize fertilizer recommendation system"""
-        self.db_path = "WareHouse"
+        self.db_path = "oldcode"
         self.crop_nutrient_requirements = self._load_crop_nutrient_requirements()
 
     def _load_crop_nutrient_requirements(self):
