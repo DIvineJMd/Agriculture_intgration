@@ -4,6 +4,9 @@ import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+from rich.console import Console
+
+console = Console()
 
 # Add the project root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -166,7 +169,7 @@ def transform_fertilizer_data():
     data = federator.query_server(fertilizer_server, query)
     
     if data is None:
-        print("[bold red]Failed to fetch data from the server[/bold red]")
+        console.print("[bold red]Failed to fetch data from the server[/bold red]")
         return
         
     # Convert to DataFrame
@@ -211,7 +214,7 @@ def transform_fertilizer_data():
     )
     
     target_conn.close()
-    print("[bold yellow]Fertilizer data transformation completed successfully![/bold yellow]")
+    console.print("[bold yellow]Fertilizer data transformation completed successfully![/bold yellow]")
 
 def get_fertilizer_recommendations(conn, soil_type=None, crop_type=None):
     """Get fertilizer recommendations with optional filtering"""

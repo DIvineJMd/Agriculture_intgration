@@ -3,6 +3,9 @@ import pandas as pd
 from datetime import datetime
 import numpy as np
 from geopy.geocoders import Nominatim
+from rich.console import Console
+
+console = Console()
 
 def get_location_details(lat, lon):
     """Get location details from latitude and longitude"""
@@ -56,7 +59,7 @@ def get_soil_health_data(state, district=None):
         }
         
     except Exception as e:
-        print(f"Error getting soil health data: {str(e)}")
+        console.print(f"[bold red]Error getting soil health data: {str(e)}[/red bold]")
         conn.close()
         return None
 
@@ -367,20 +370,20 @@ def main():
     )
     
     # Print results
-    print("\nProfit Maximization Analysis Results:")
+    console.print("[bold cyan]\nProfit Maximization Analysis Results:[/bold cyan]")
     print(f"Crop: {analysis['crop']}")
     print(f"Location: {analysis['location']}")
     print(f"\nProfit Potential Score: {analysis['profit_potential_score']:.2f}/100")
     
     if analysis['risk_factors']:
-        print("\nRisk Assessment:")
+        console.print("[bold bright_red]\nRisk Assessment:[/bold bright_red]")
         for category, factors in analysis['risk_factors'].items():
             print(f"\n{category.title()}:")
             for factor, value in factors.items():
                 print(f"- {factor}: {value}")
     
     if analysis['recommendations']:
-        print("\nFinancial Recommendations:")
+        console.print("[bold green]\nFinancial Recommendations:[/bold green]")
         for rec in analysis['recommendations']:
             print(f"- {rec}")
 

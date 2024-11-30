@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from geopy.geocoders import Nominatim
+from rich.console import Console
+
+console = Console()
+
 class FertilizerRecommendationSystem:
     def __init__(self):
         """Initialize fertilizer recommendation system"""
@@ -285,7 +289,7 @@ def main():
         print(f"Error: {plan['error']}")
         return
         
-    print(f"\nFertilizer Plan for {crop} in {location}")
+    console.print(f"[bold blue]\nFertilizer Plan for {crop} in {location}[/bold blue]")
     print("\nSoil Health:")
     for nutrient, value in plan['soil_health'].items():
         print(f"{nutrient.capitalize()}: {value}")
@@ -300,7 +304,7 @@ def main():
         for nutrient, amount in stage['nutrients'].items():
             print(f"  {nutrient}: {amount:.1f} kg/ha")
             
-    print("\nRecommended Fertilizers:")
+    console.print("[bold green]\nRecommended Fertilizers:[/bold green]")
     for rec in plan['recommended_fertilizers']:
         print(f"\n{rec['fertilizer']}:")
         print(f"Match Score: {rec['match_score']:.2f}")

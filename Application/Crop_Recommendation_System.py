@@ -2,6 +2,10 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import os
+from rich.console import Console
+
+console = Console()
+
 class CropRecommendationSystem:
     def __init__(self):
         """Initialize the crop recommendation system"""
@@ -409,7 +413,7 @@ def main():
     for key, value in recommendations['location_details'].items():
         print(f"{key.replace('_', ' ').title()}: {value}")
     
-    print("\n[bold green]Highly Suitable Crops:[/bold green]")
+    console.print("\n[bold green]Highly Suitable Crops:[/bold green]")
     if recommendations['highly_suitable_crops']:
         for crop in recommendations['highly_suitable_crops']:
             print(f"\n{crop['crop']}:")
@@ -422,7 +426,7 @@ def main():
     else:
         print("No highly suitable crops found for this season")
     
-    print("\n[bold yellow]Moderately Suitable Crops:[/bold yellow]")
+    console.print("\n[bold yellow]Moderately Suitable Crops:[/bold yellow]")
     if recommendations['moderately_suitable_crops']:
         for crop in recommendations['moderately_suitable_crops']:
             print(f"\n{crop['crop']}:")
@@ -433,7 +437,7 @@ def main():
             print(f"Suitable Seasons: {', '.join(crop['details']['suitable_seasons'])}")
             print(f"Preferred Irrigation: {crop['details']['preferred_irrigation']}")
     else:
-        print("[bold cyan]No moderately suitable crops found for this location and season[/bold cyan]")
+        console.print("[bold cyan]No moderately suitable crops found for this location and season[/bold cyan]")
 
         print("No moderately suitable crops found for this season")
 if __name__ == "__main__":

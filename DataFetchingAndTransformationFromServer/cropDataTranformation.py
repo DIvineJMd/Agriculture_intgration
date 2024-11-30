@@ -3,6 +3,9 @@ import pandas as pd
 import os
 import sys
 from dotenv import load_dotenv
+from rich.console import Console
+
+console = Console()
     
 # Add the project root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -74,10 +77,10 @@ def fetch_and_transform_data():
             
             # Commit and close
             conn.commit()
-            conn.close()
-            print("[bold yellow]Data succesfully transformed.[bold yellow]")
+            conn.close() 
+            console.print("[bold yellow]Data succesfully transformed.[bold yellow]")
         else:
-            print("[bold red]Failed to fetch data from the server.[/bold red]")
+            console.print("[bold red]Failed to fetch data from the server.[/bold red]")
             
     except Exception as e:
         print(f"Error in crop data transformation: {str(e)}")

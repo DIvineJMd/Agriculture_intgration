@@ -1,6 +1,9 @@
 import sqlite3
 import pandas as pd
 import os
+from rich.console import Console
+
+console = Console()
 
 def create_transformed_database():
     """Create and set up the transformed weather database"""
@@ -224,7 +227,7 @@ def main():
     source_conn.close()
     target_conn.close()
     
-    print("[bold yellow]Weather data transformation completed successfully![/bold yellow]")
+    console.print("[bold yellow]Weather data transformation completed successfully![/bold yellow]")
 
 if __name__ == "__main__":
     main()

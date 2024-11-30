@@ -4,6 +4,9 @@ import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+from rich.console import Console
+
+console = Console()
 
 # Add the project root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,7 +57,7 @@ def fetch_and_transform_soil_data():
         data = federator.query_server(soil_server, query)
         
         if data is None:
-            print("[bold red]Failed to fetch soil types data from the server[bold red]")
+            console.print("[bold red]Failed to fetch soil types data from the server[bold red]")
             return
         
         # Convert to DataFrame
@@ -108,7 +111,7 @@ def fetch_and_transform_soil_data():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_soil_type_states_state ON soil_type_states(state)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_soil_type_states_soil_type_id ON soil_type_states(soil_type_id)')
         
-        print("[bold yellow]Soil types database extracted successfully![bold yellow]")
+        console.print("[bold yellow]Soil types database extracted successfully![bold yellow]")
         
         # Verify the data
         cursor.execute("SELECT COUNT(*) FROM soil_types")

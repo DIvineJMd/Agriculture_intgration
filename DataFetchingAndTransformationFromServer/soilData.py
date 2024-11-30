@@ -1,6 +1,9 @@
 import sqlite3
 import pandas as pd
 import os
+from rich.console import Console
+
+console = Console()
 
 def create_transformed_database():
     """Create transformed database for soil health data"""
@@ -186,7 +189,7 @@ def main():
     micro_conn.close()
     target_conn.close()
     
-    print("[bold yellow]Soil health data transformation completed successfully![/bold yellow]")
+    console.print("[bold yellow]Soil health data transformation completed successfully![/bold yellow]")
 
 if __name__ == "__main__":
     main()

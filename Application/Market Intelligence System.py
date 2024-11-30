@@ -3,6 +3,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
 from geopy.geocoders import Nominatim
+from rich.console import Console
+
+console = Console()
 
 def get_price_trends(crop, state, months=6):
     """Get historical price trends and statistics aggregated for entire state"""
@@ -373,7 +376,7 @@ def print_location_analysis(state):
         print(f"\n{crop}")
         print("-" * len(crop))
         
-        print(f"Market Coverage: {row['district_count']} districts")
+        console.print(f"[bold yellow]Market Coverage: {row['district_count']} districts[/bold yellow]")
         
         # Price Statistics
         print("\nPrice Statistics (State Average):")
@@ -386,7 +389,7 @@ def print_location_analysis(state):
         # Get detailed market insights
         insights = get_market_insights(crop, state)
         if insights:
-            print("\n[bold cyan]Market Intelligence:[/bold cyan]")
+            console.print("\n[bold cyan]Market Intelligence:[/bold cyan]")
             print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
             print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             
@@ -398,7 +401,7 @@ def print_location_analysis(state):
             for period in insights['best_selling_periods']:
                 print(f"- {period}")
             
-            print("\nStrategic Recommendations:")
+            console.print("[bold green]\nStrategic Recommendations:[/bold green]")
             for rec in insights['recommendations']:
                 print(f"- {rec}")
         
