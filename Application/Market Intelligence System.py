@@ -2,37 +2,42 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
-from geopy.geocoders import Nominatim
-from rich.console import Console
 
-console = Console()
-
-def get_price_trends(crop, state, months=6):
-    """Get historical price trends and statistics aggregated for entire state"""
+def get_price_trends(crop, state, district=None, months=6):
+    """Get historical price trends and statistics"""
     conn = sqlite3.connect('oldcode/crop_prices_transformed.db')
+    district=district.title()
+    # Normalize input
+    state = state.title()  # "ANDHRA PRADESH" -> "Andhra Pradesh"
+    crop = crop.title()    # "MAIZE" -> "Maize"
     
     query = """
     SELECT 
         arrival_date,
-        AVG(price_per_quintal) as price_per_quintal,
-        AVG(monthly_avg_price) as monthly_avg_price,
-        AVG(price_trend_indicator) as price_trend_indicator,
-        AVG(seasonal_index) as seasonal_index,
-        AVG(price_volatility) as price_volatility,
-        COUNT(DISTINCT district) as district_count
+        price_per_quintal,
+        monthly_avg_price,
+        price_trend_indicator,
+        seasonal_index,
+        price_volatility
     FROM transformed_crop_prices
     WHERE LOWER(commodity) = LOWER(?) 
     AND LOWER(state) = LOWER(?)
-    GROUP BY arrival_date
-    ORDER BY arrival_date DESC 
-    LIMIT ?
     """
+    params = [crop, state]
     
-    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
-    conn.close()
+    if district:
+        query += " AND LOWER(district) = LOWER(?)"
+        params.append(district)
     
+    query += " ORDER BY arrival_date DESC LIMIT ?"
+    params.append(months * 30)
+    
+    # print(f"\nDebug: Executing query with params: {params}")
+    df = pd.read_sql_query(query, conn, params=params)
+    # print(df)
     if df.empty:
         print(f"Warning: No data found for {crop} in {state}")
+        conn.close()
         return None
     
     result = {
@@ -44,78 +49,54 @@ def get_price_trends(crop, state, months=6):
         'price_range': {
             'min': df['price_per_quintal'].min(),
             'max': df['price_per_quintal'].max()
-        },
-        'district_coverage': df['district_count'].iloc[0]
+        }
     }
     
+    conn.close()
     return result
 
-def get_soil_suitability(state):
+def get_soil_suitability(crop, state, district=None):
     """Analyze soil suitability for the crop"""
-    try:
-        conn = sqlite3.connect('oldcode/soil_health_transformed.db')
-        query = """
-        SELECT 
-            AVG(nitrogen_level) as nitrogen_level,
-            AVG(phosphorous_level) as phosphorous_level,
-            AVG(potassium_level) as potassium_level,
-            AVG(organic_carbon_level) as organic_carbon_level,
-            AVG(npk_score) as npk_score,
-            AVG(micro_score) as micro_score,
-            AVG(overall_soil_health_score) as overall_soil_health_score,
-            GROUP_CONCAT(DISTINCT district) as districts,
-            GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
-            GROUP_CONCAT(DISTINCT ec_level) as ec_levels
-        FROM soil_health
-        WHERE LOWER(state) = LOWER(?)
-        GROUP BY state
-        """
-        
-        df = pd.read_sql_query(query, conn, params=[state])
-        conn.close()
-        
-        if df.empty:
-            print(f"Warning: No soil data found for {state}")
-            return {
-                'soil_health_score': 50.0,
-                'npk_status': 50.0,
-                'ph_level': 'Neutral',
-                'ec_level': 'Non Saline',
-                'suitability_score': 50.0,
-                'districts': 'No data'
-            }
-        
-        # Calculate NPK status
-        npk_status = df['npk_score'].iloc[0]
-        
-        # Get most common pH and EC levels
-        ph_levels = df['ph_levels'].iloc[0].split(',')
-        ec_levels = df['ec_levels'].iloc[0].split(',')
-        
-        return {
-            'soil_health_score': df['overall_soil_health_score'].iloc[0],
-            'npk_status': npk_status,
-            'ph_level': max(set(ph_levels), key=ph_levels.count),
-            'ec_level': max(set(ec_levels), key=ec_levels.count),
-            'suitability_score': df['overall_soil_health_score'].iloc[0] * 0.8,
-            'districts': df['districts'].iloc[0]
-        }
-        
-    except Exception as e:
-        print(f"Warning: Error getting soil data - {str(e)}")
-        return {
-            'soil_health_score': 50.0,
-            'npk_status': 50.0,
-            'ph_level': 'Neutral',
-            'ec_level': 'Non Saline',
-            'suitability_score': 50.0,
-            'districts': 'Error getting data'
-        }
+    conn = sqlite3.connect('oldcode/soil_health_transformed.db')
+    
+    query = """
+    SELECT 
+        nitrogen_level,
+        phosphorous_level,
+        potassium_level,
+        organic_carbon_level,
+        ph_level,
+        ec_level,
+        npk_score,
+        micro_score,
+        overall_soil_health_score
+    FROM soil_health
+    WHERE state = ?
+    """
+    params = [state]
+    
+    if district:
+        query += " AND district = ?"
+        params.append(district)
+    
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    
+    if df.empty:
+        return None
+    
+    return {
+        'soil_health_score': df['overall_soil_health_score'].mean(),
+        'npk_status': df['npk_score'].mean(),
+        'ph_level': df['ph_level'].iloc[0],
+        'suitability_score': df['overall_soil_health_score'].mean() * 0.8  # Simplified suitability
+    }
 
 def get_irrigation_status(state):
     """Get irrigation availability and infrastructure details"""
     conn = sqlite3.connect('oldcode/irrigation_transformed.db')
     
+   
     # Normalize state name
     state = state.title()
     
@@ -132,6 +113,7 @@ def get_irrigation_status(state):
     """
     
     df = pd.read_sql_query(query, conn, params=[state])
+    # print(df)
     conn.close()
     
     if df.empty:
@@ -144,11 +126,11 @@ def get_irrigation_status(state):
         'water_availability_score': df['water_source_diversity_score'].iloc[0]
     }
 
-def get_market_insights(crop, state):
+def get_market_insights(crop, state, district=None):
     """Comprehensive market intelligence analysis"""
     
     # Get price trends
-    price_data = get_price_trends(crop, state)
+    price_data = get_price_trends(crop, state, district)
     if not price_data:
         price_data = {
             'current_price': 0.0,
@@ -161,13 +143,12 @@ def get_market_insights(crop, state):
         print(f"Warning: No price data available for {crop} in {state}")
     
     # Get soil suitability
-    soil_data = get_soil_suitability(crop, state)
+    soil_data = get_soil_suitability(crop, state, district)
     if not soil_data:
         soil_data = {
             'soil_health_score': 50.0,
             'npk_status': 50.0,
             'ph_level': 'Neutral',
-            'ec_level': 'Non Saline',
             'suitability_score': 50.0
         }
         print(f"Warning: No soil data available for {state}")
@@ -283,15 +264,17 @@ def generate_recommendations(price_data, soil_data, irrigation_data, market_risk
     
     return recommendations
 
-def get_location_crop_statistics(state):
-    """Get aggregated price statistics for all crops in state"""
+def get_location_crop_statistics(state, district=None):
+    """Get price statistics for all crops in a location"""
     conn = sqlite3.connect('oldcode/crop_prices_transformed.db')
+    
+    # Normalize state name
+    state = state.title()
     
     query = """
     SELECT 
         commodity as crop,
         COUNT(*) as total_records,
-        COUNT(DISTINCT district) as district_count,
         ROUND(AVG(price_per_quintal), 2) as avg_price,
         ROUND(MIN(price_per_quintal), 2) as min_price,
         ROUND(MAX(price_per_quintal), 2) as max_price,
@@ -299,11 +282,21 @@ def get_location_crop_statistics(state):
         ROUND(AVG(seasonal_index), 2) as seasonal_index
     FROM transformed_crop_prices
     WHERE LOWER(state) = LOWER(?)
+    """
+    params = [state]
+    
+    if district:
+        query += " AND LOWER(district) = LOWER(?)"
+        params.append(district.title())
+    
+    query += """
     GROUP BY commodity
     ORDER BY avg_price DESC
     """
     
-    df = pd.read_sql_query(query, conn, params=[state])
+    # Pass both query and params to read_sql_query
+    df = pd.read_sql_query(query, conn, params=params)
+    
     conn.close()
     
     if df.empty:
@@ -312,7 +305,7 @@ def get_location_crop_statistics(state):
     
     return df
 
-def get_available_crops(state):
+def get_available_crops(state, district=None):
     """Get list of crops with available price data"""
     conn = sqlite3.connect('oldcode/crop_prices_transformed.db')
     
@@ -323,51 +316,56 @@ def get_available_crops(state):
     """
     params = [state]
     
+    if district:
+        query += " AND LOWER(district) = LOWER(?)"
+        params.append(district)
+    
     df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     
-    return df['commodity'].tolist() if not df.empty else []
+    return df['commodity'].tolist()
 
-def print_location_analysis(state):
-    """Print comprehensive state-level crop analysis"""
-    print("\nState-wide Crop Market Analysis Report")
+def print_location_analysis(state, district=None):
+    """Print comprehensive location-based crop analysis"""
+    print("\nCrop Market Analysis Report")
     print("=" * 50)
-    print(f"State: {state}")
+    print(f"Location: {state}")
+    if district:
+        print(f"District: {district}")
     
     # Get available crops first
-    available_crops = get_available_crops(state)
+    available_crops = get_available_crops(state, district)
     if not available_crops:
         print(f"\nNo crop price data available for {state}")
         return
     
-    print(f"\nTotal Crops Analyzed: {len(available_crops)}")
+    print(f"\nAvailable Crops: {', '.join(available_crops)}")
     
     # Get crop statistics and market insights for each crop
-    stats = get_location_crop_statistics(state)
+    stats = get_location_crop_statistics(state, district)
     
     if stats is None:
         return
         
-    # Print state-wide metrics
-    soil_data = get_soil_suitability(None, state)
+    # Print location-specific metrics first (same for all crops)
+    soil_data = get_soil_suitability(None, state, district)
     irrigation_data = get_irrigation_status(state)
     
-    print("\nState-wide Agricultural Metrics")
-    print("-" * 40)
+    print("\nLocation-specific Metrics")
+    print("-" * 30)
     if soil_data:
-        print("\nSoil Health Summary:")
-        print(f"- Overall Soil Health: {soil_data['soil_health_score']:.1f}/100")
+        print("\nSoil Health Metrics:")
+        print(f"- Overall Health Score: {soil_data['soil_health_score']:.1f}/100")
         print(f"- NPK Status: {soil_data['npk_status']:.1f}/100")
-        print(f"- Predominant pH Level: {soil_data['ph_level']}")
-        print(f"- Predominant EC Level: {soil_data['ec_level']}")
+        print(f"- pH Level: {soil_data['ph_level']}")
     
     if irrigation_data:
-        print("\nIrrigation Infrastructure:")
-        print(f"- State Coverage: {irrigation_data['irrigation_coverage']:.1f}%")
+        print("\nIrrigation Metrics:")
+        print(f"- Coverage: {irrigation_data['irrigation_coverage']:.1f}%")
         print(f"- Growth Trend: {irrigation_data['growth_trend']:.1f}%")
         print(f"- Water Availability: {irrigation_data['water_availability_score']:.1f}/100")
     
-    print("\nCrop-wise Market Analysis")
+    print("\nCrop-wise Analysis")
     print("=" * 50)
     
     # Analyze each crop
@@ -376,155 +374,36 @@ def print_location_analysis(state):
         print(f"\n{crop}")
         print("-" * len(crop))
         
-        console.print(f"[bold yellow]Market Coverage: {row['district_count']} districts[/bold yellow]")
-        
         # Price Statistics
-        print("\nPrice Statistics (State Average):")
+        print("\nPrice Statistics:")
         print(f"- Average Price: ₹{row['avg_price']:,.2f} per quintal")
         print(f"- Price Range: ₹{row['min_price']:,.2f} - ₹{row['max_price']:,.2f}")
         print(f"- Price Volatility: {row['avg_volatility']}%")
-        print(f"- Seasonal Index: {row['seasonal_index']:.2f}")
-        print(f"- Total Market Records: {row['total_records']}")
+        print(f"- Seasonal Strength: {row['seasonal_index']:.2f}")
+        print(f"- Records Available: {row['total_records']}")
         
         # Get detailed market insights
-        insights = get_market_insights(crop, state)
+        insights = get_market_insights(crop, state, district)
         if insights:
-            console.print("\n[bold cyan]Market Intelligence:[/bold cyan]")
+            print("\nMarket Intelligence:")
             print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
             print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             
             forecast = insights['price_forecast']['short_term']
-            print(f"\nState-wide Price Forecast:")
+            print(f"\nPrice Forecast:")
             print(f"- Expected Range: ₹{forecast['range']['low']:,.2f} - ₹{forecast['range']['high']:,.2f}")
             
-            print("\nMarket Timing:")
+            print("\nBest Selling Periods:")
             for period in insights['best_selling_periods']:
                 print(f"- {period}")
             
-            console.print("[bold green]\nStrategic Recommendations:[/bold green]")
+            print("\nRecommendations:")
             for rec in insights['recommendations']:
                 print(f"- {rec}")
         
         print("\n" + "="*50)
 
-def get_price_trends(crop, state, months=6):
-    """Retrieve historical price trends and statistics for a crop in a state."""
-    conn = sqlite3.connect('oldcode/crop_prices_transformed.db')
-    query = """
-    SELECT 
-        arrival_date,
-        AVG(price_per_quintal) as price_per_quintal,
-        AVG(monthly_avg_price) as monthly_avg_price,
-        AVG(price_trend_indicator) as price_trend_indicator,
-        AVG(seasonal_index) as seasonal_index,
-        AVG(price_volatility) as price_volatility,
-        COUNT(DISTINCT district) as district_count
-    FROM transformed_crop_prices
-    WHERE LOWER(commodity) = LOWER(?) 
-    AND LOWER(state) = LOWER(?)
-    GROUP BY arrival_date
-    ORDER BY arrival_date DESC 
-    LIMIT ?
-    """
-    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No data found for {crop} in {state}")
-        return None
-    
-    result = {
-        'current_price': df['price_per_quintal'].iloc[0],
-        'avg_price': df['monthly_avg_price'].mean(),
-        'price_trend': df['price_trend_indicator'].mean(),
-        'volatility': df['price_volatility'].mean(),
-        'seasonal_strength': df['seasonal_index'].std(),
-        'price_range': {
-            'min': df['price_per_quintal'].min(),
-            'max': df['price_per_quintal'].max()
-        },
-        'district_coverage': df['district_count'].iloc[0]
-    }
-    return result
-
-def get_soil_suitability(state):
-    """Analyze soil suitability for crops in a state."""
-    conn = sqlite3.connect('oldcode/soil_health_transformed.db')
-    query = """
-    SELECT 
-        AVG(overall_soil_health_score) as overall_soil_health_score,
-        AVG(npk_score) as npk_score,
-        GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
-        GROUP_CONCAT(DISTINCT ec_level) as ec_levels
-    FROM soil_health
-    WHERE LOWER(state) = LOWER(?)
-    GROUP BY state
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No soil data found for {state}")
-        return None
-    
-    ph_levels = df['ph_levels'].iloc[0].split(',')
-    ec_levels = df['ec_levels'].iloc[0].split(',')
-    
-    return {
-        'soil_health_score': df['overall_soil_health_score'].iloc[0],
-        'npk_status': df['npk_score'].iloc[0],
-        'ph_level': max(set(ph_levels), key=ph_levels.count),
-        'ec_level': max(set(ec_levels), key=ec_levels.count)
-    }
-
-def get_irrigation_status(state):
-    """Retrieve irrigation availability and infrastructure details."""
-    conn = sqlite3.connect('oldcode/irrigation_transformed.db')
-    query = """
-    SELECT 
-        irrigation_coverage_ratio,
-        water_source_diversity_score
-    FROM transformed_irrigation
-    WHERE LOWER(state) = LOWER(?)
-    ORDER BY year DESC
-    LIMIT 1
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No irrigation data found for {state}")
-        return None
-    
-    return {
-        'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
-        'water_availability_score': df['water_source_diversity_score'].iloc[0]
-    }
-
-def get_location_details(lat, lon):
-    """Get location details from latitude and longitude"""
-    geolocator = Nominatim(user_agent="IIA")
-    location = geolocator.reverse(f"{lat},{lon}")
-    state = location.raw['address'].get('state')
-    district = location.raw['address'].get('state_district')
-    return location.address, state, district
-
-def main():
-    # Example coordinates (Visakhapatnam)
-    lat, lon = 17.6868, 83.2185
-    
-    # Get location details
-    address, state, _ = get_location_details(lat, lon)
-    if state is None:
-        print("Could not determine state location. Please check your connection.")
-        return
-    
-    print(f"\nLocation Details:")
-    print(f"Address: {address}")
-    print(f"State: {state}")
-    
-    # Generate state-wide analysis
-    print_location_analysis(state)
-
 if __name__ == "__main__":
-    main()
+    state = "ANDHRA PRADESH"
+    district = "ANANTAPUR"
+    print_location_analysis(state, district)
