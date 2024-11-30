@@ -4,6 +4,7 @@ from datetime import datetime
 import numpy as np
 from geopy.geocoders import Nominatim
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -458,7 +459,142 @@ def _fetch_weather_conditions(self, state, district=None):
         console.print(f"[bold red]Error fetching weather data: {e}[/bold red]")
         return None
 
+def create_analysis_view(crop, state, district=None):
+    """Create a comprehensive view combining all analysis data using SQL-style CTEs"""
+    try:
+        # Fetch all relevant data
+        weather_data = get_weather_conditions(state, district)
+        soil_data = get_soil_health_data(state, district)
+        price_data = get_crop_price_trends(state, crop)
+        irrigation_data = get_irrigation_data(state)
 
+        # Create SQL-style view
+        query = """
+        CREATE VIEW profit_potential_analysis AS
+        WITH weather_conditions AS (
+            SELECT 
+                'Maximum Temperature' as metric,
+                {temp_max} as value,
+                '°C' as unit
+            UNION ALL SELECT 'Minimum Temperature', {temp_min}, '°C'
+            UNION ALL SELECT 'Average Humidity', {humidity}, '%'
+            UNION ALL SELECT 'Precipitation Sum', {precip}, 'mm'
+            UNION ALL SELECT 'Soil Moisture', {soil_moisture}, ''
+            UNION ALL SELECT 'Growing Condition Score', {growing_score}, '/100'
+        ),
+        soil_health AS (
+            SELECT 
+                'Overall Soil Health' as metric,
+                {soil_health_score} as value,
+                '/100' as unit
+            UNION ALL SELECT 'NPK Score', {npk_score}, '/100'
+            UNION ALL SELECT 'Micro Score', {micro_score}, '/100'
+            UNION ALL SELECT 'pH Level', '{ph_level}', ''
+            UNION ALL SELECT 'EC Level', '{ec_level}', ''
+        ),
+        irrigation_status AS (
+            SELECT 
+                'Coverage' as metric,
+                {irr_coverage} as value,
+                '%' as unit
+            UNION ALL SELECT 'Growth Trend', {growth_trend}, '%'
+            UNION ALL SELECT 'Water Availability', {water_score}, '/100'
+        ),
+        price_trends AS (
+            {price_data_query}
+        )
+        """
+
+        # Format query with actual values
+        formatted_query = query.format(
+            # Weather data
+            temp_max=weather_data['temperature_max'],
+            temp_min=weather_data['temperature_min'],
+            humidity=weather_data['humidity_avg'],
+            precip=weather_data['precipitation_sum'],
+            soil_moisture=weather_data['soil_moisture_surface'],
+            growing_score=weather_data['growing_condition_score'],
+            
+            # Soil health data
+            soil_health_score=soil_data['overall_soil_health_score'],
+            npk_score=soil_data['npk_score'],
+            micro_score=soil_data['micro_score'],
+            ph_level=soil_data['ph_level'],
+            ec_level=soil_data['ec_level'],
+            
+            # Irrigation data
+            irr_coverage=irrigation_data['irrigation_coverage'],
+            growth_trend=irrigation_data['growth_trend'],
+            water_score=irrigation_data['water_availability_score'],
+            
+            # Price trends data
+            price_data_query='\nUNION ALL\n'.join([
+                f"""SELECT 
+                    '{row['arrival_date']}' as date,
+                    {row['price_per_quintal']} as price,
+                    {row['price_trend_indicator']} as trend,
+                    {row['price_volatility']} as volatility
+                """ for _, row in price_data.head(5).iterrows()
+            ]) if price_data is not None and not price_data.empty else "SELECT NULL as date, NULL as price, NULL as trend, NULL as volatility"
+        )
+
+        # Create comprehensive view table
+        view_table = Table(title=f"[bold cyan]Profit Potential Analysis View for {crop} in {state}{f', {district}' if district else ''}[/bold cyan]")
+        
+        # Add columns
+        view_table.add_column("Category", style="cyan", width=20)
+        view_table.add_column("Metric", style="green", width=25)
+        view_table.add_column("Value", justify="right", width=15)
+        view_table.add_column("Unit/Note", justify="center", width=15)
+
+        # Add weather data
+        for metric, value in {
+            "Maximum Temperature": f"{weather_data['temperature_max']:.1f}°C",
+            "Minimum Temperature": f"{weather_data['temperature_min']:.1f}°C",
+            "Average Humidity": f"{weather_data['humidity_avg']:.1f}%",
+            "Precipitation Sum": f"{weather_data['precipitation_sum']:.1f}mm",
+            "Soil Moisture": f"{weather_data['soil_moisture_surface']:.2f}",
+            "Growing Condition Score": f"{weather_data['growing_condition_score']:.1f}/100"
+        }.items():
+            view_table.add_row("Weather Conditions", metric, value, "")
+
+        # Add soil health data
+        for metric, value in {
+            "Overall Soil Health": f"{soil_data['overall_soil_health_score']:.1f}/100",
+            "NPK Score": f"{soil_data['npk_score']:.1f}/100",
+            "Micro Score": f"{soil_data['micro_score']:.1f}/100",
+            "pH Level": str(soil_data['ph_level']),
+            "EC Level": str(soil_data['ec_level'])
+        }.items():
+            view_table.add_row("Soil Health", metric, value, "")
+
+        # Add irrigation data
+        for metric, value in {
+            "Coverage": f"{irrigation_data['irrigation_coverage']:.1f}%",
+            "Growth Trend": f"{irrigation_data['growth_trend']:.1f}%",
+            "Water Availability": f"{irrigation_data['water_availability_score']:.1f}/100"
+        }.items():
+            view_table.add_row("Irrigation Status", metric, value, "")
+
+        # Add price trends
+        if price_data is not None and not price_data.empty:
+            for _, row in price_data.head(5).iterrows():
+                view_table.add_row(
+                    "Price Trends",
+                    str(row['arrival_date']),
+                    f"₹{row['price_per_quintal']:,.2f}",
+                    f"Trend: {row['price_trend_indicator']:.2f}"
+                )
+
+        # Display the comprehensive view
+        console.print("\n")
+        console.print(view_table)
+        
+    except Exception as e:
+        console.print(f"[bold red]Error creating analysis view: {e}[/bold red]")
+        console.print(f"[yellow]Query attempted:[/yellow]\n{formatted_query}")
+
+# Modify main function to include the view
 def main():
     # Get location details (example coordinates for Visakhapatnam)
     lat, lon = 17.6868, 83.2185
@@ -472,6 +608,9 @@ def main():
     # Get crop input
     crop = input("Enter the crop name you want to analyze: ").lower()
     
+    # Create and display the comprehensive view
+    create_analysis_view(crop, state, district)
+    
     # Get analysis
     analysis = analyze_profit_potential(
         crop=crop,
@@ -482,7 +621,6 @@ def main():
     # Print results
     console.print("[bold cyan]\nProfit Maximization Analysis Results:[/bold cyan]")
     print(f"Crop: {analysis['crop']}")
-    # print(f"Location: {analysis['location']}")
     print(f"\nProfit Potential Score: {analysis['profit_potential_score']:.2f}/100")
     
     if analysis['risk_factors']:

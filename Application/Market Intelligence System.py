@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import numpy as np
 from geopy.geocoders import Nominatim
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -376,7 +377,7 @@ def print_location_analysis(state):
         print(f"\n{crop}")
         print("-" * len(crop))
         
-        console.print(f"[bold yellow]Market Coverage: {row['district_count']} districts[/bold yellow]")
+        print(f"Market Coverage: {row['district_count']} districts")
         
         # Price Statistics
         print("\nPrice Statistics (State Average):")
@@ -389,7 +390,7 @@ def print_location_analysis(state):
         # Get detailed market insights
         insights = get_market_insights(crop, state)
         if insights:
-            console.print("\n[bold cyan]Market Intelligence:[/bold cyan]")
+            print("\n[bold cyan]Market Intelligence:[/bold cyan]")
             print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
             print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             
@@ -401,105 +402,11 @@ def print_location_analysis(state):
             for period in insights['best_selling_periods']:
                 print(f"- {period}")
             
-            console.print("[bold green]\nStrategic Recommendations:[/bold green]")
+            print("\nStrategic Recommendations:")
             for rec in insights['recommendations']:
                 print(f"- {rec}")
         
         print("\n" + "="*50)
-
-def get_price_trends(crop, state, months=6):
-    """Retrieve historical price trends and statistics for a crop in a state."""
-    conn = sqlite3.connect('WareHouse/crop_prices_transformed.db')
-    query = """
-    SELECT 
-        arrival_date,
-        AVG(price_per_quintal) as price_per_quintal,
-        AVG(monthly_avg_price) as monthly_avg_price,
-        AVG(price_trend_indicator) as price_trend_indicator,
-        AVG(seasonal_index) as seasonal_index,
-        AVG(price_volatility) as price_volatility,
-        COUNT(DISTINCT district) as district_count
-    FROM transformed_crop_prices
-    WHERE LOWER(commodity) = LOWER(?) 
-    AND LOWER(state) = LOWER(?)
-    GROUP BY arrival_date
-    ORDER BY arrival_date DESC 
-    LIMIT ?
-    """
-    df = pd.read_sql_query(query, conn, params=[crop, state, months * 30])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No data found for {crop} in {state}")
-        return None
-    
-    result = {
-        'current_price': df['price_per_quintal'].iloc[0],
-        'avg_price': df['monthly_avg_price'].mean(),
-        'price_trend': df['price_trend_indicator'].mean(),
-        'volatility': df['price_volatility'].mean(),
-        'seasonal_strength': df['seasonal_index'].std(),
-        'price_range': {
-            'min': df['price_per_quintal'].min(),
-            'max': df['price_per_quintal'].max()
-        },
-        'district_coverage': df['district_count'].iloc[0]
-    }
-    return result
-
-def get_soil_suitability(state):
-    """Analyze soil suitability for crops in a state."""
-    conn = sqlite3.connect('WareHouse/soil_health_transformed.db')
-    query = """
-    SELECT 
-        AVG(overall_soil_health_score) as overall_soil_health_score,
-        AVG(npk_score) as npk_score,
-        GROUP_CONCAT(DISTINCT ph_level) as ph_levels,
-        GROUP_CONCAT(DISTINCT ec_level) as ec_levels
-    FROM soil_health
-    WHERE LOWER(state) = LOWER(?)
-    GROUP BY state
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No soil data found for {state}")
-        return None
-    
-    ph_levels = df['ph_levels'].iloc[0].split(',')
-    ec_levels = df['ec_levels'].iloc[0].split(',')
-    
-    return {
-        'soil_health_score': df['overall_soil_health_score'].iloc[0],
-        'npk_status': df['npk_score'].iloc[0],
-        'ph_level': max(set(ph_levels), key=ph_levels.count),
-        'ec_level': max(set(ec_levels), key=ec_levels.count)
-    }
-
-def get_irrigation_status(state):
-    """Retrieve irrigation availability and infrastructure details."""
-    conn = sqlite3.connect('WareHouse/irrigation_transformed.db')
-    query = """
-    SELECT 
-        irrigation_coverage_ratio,
-        water_source_diversity_score
-    FROM transformed_irrigation
-    WHERE LOWER(state) = LOWER(?)
-    ORDER BY year DESC
-    LIMIT 1
-    """
-    df = pd.read_sql_query(query, conn, params=[state])
-    conn.close()
-    
-    if df.empty:
-        console.print(f"[bold red]Warning:[/bold red] No irrigation data found for {state}")
-        return None
-    
-    return {
-        'irrigation_coverage': df['irrigation_coverage_ratio'].iloc[0],
-        'water_availability_score': df['water_source_diversity_score'].iloc[0]
-    }
 
 def get_location_details(lat, lon):
     """Get location details from latitude and longitude"""
@@ -508,6 +415,169 @@ def get_location_details(lat, lon):
     state = location.raw['address'].get('state')
     district = location.raw['address'].get('state_district')
     return location.address, state, district
+
+def create_market_analysis_view(state, crop=None):
+    """Create a comprehensive market analysis view using SQL-style CTEs"""
+    try:
+        # Get all available crops if crop is not specified
+        crops = [crop] if crop else get_available_crops(state)
+        
+        # Base query structure
+        query = """
+        CREATE VIEW market_analysis AS
+        WITH price_metrics AS (
+            SELECT 
+                crop_name,
+                current_price,
+                avg_price,
+                volatility * 100 as price_volatility,
+                seasonal_strength
+            FROM (
+                {price_data}
+            )
+        ),
+        soil_metrics AS (
+            SELECT 
+                crop_name,
+                soil_health_score,
+                npk_status,
+                ph_level
+            FROM (
+                {soil_data}
+            )
+        ),
+        irrigation_metrics AS (
+            SELECT 
+                irrigation_coverage,
+                water_availability_score
+            FROM (
+                SELECT 
+                    {irrigation_coverage} as irrigation_coverage,
+                    {water_availability} as water_availability_score
+            )
+        ),
+        risk_assessment AS (
+            SELECT 
+                p.crop_name,
+                p.current_price,
+                p.avg_price,
+                p.price_volatility,
+                p.seasonal_strength,
+                s.soil_health_score,
+                s.npk_status,
+                s.ph_level,
+                i.irrigation_coverage,
+                i.water_availability_score,
+                CASE
+                    WHEN p.volatility > 0.3 THEN 'High Risk'
+                    WHEN p.volatility > 0.15 THEN 'Medium Risk'
+                    ELSE 'Low Risk'
+                END as risk_category
+            FROM price_metrics p
+            JOIN soil_metrics s ON p.crop_name = s.crop_name
+            CROSS JOIN irrigation_metrics i
+        )
+        """
+        
+        # Collect data for all crops
+        price_data_list = []
+        soil_data_list = []
+        
+        for current_crop in crops:
+            # Get metrics
+            price_data = get_price_trends(current_crop, state)
+            soil_data = get_soil_suitability(current_crop, state)
+            irrigation_data = get_irrigation_status(state)
+            
+            if not all([price_data, soil_data, irrigation_data]):
+                continue
+            
+            # Add to data lists
+            price_data_list.append(f"""
+                SELECT 
+                    '{current_crop}' as crop_name,
+                    {price_data['current_price']} as current_price,
+                    {price_data['avg_price']} as avg_price,
+                    {price_data['volatility']} as volatility,
+                    {price_data['seasonal_strength']} as seasonal_strength
+            """)
+            
+            soil_data_list.append(f"""
+                SELECT 
+                    '{current_crop}' as crop_name,
+                    {soil_data['soil_health_score']} as soil_health_score,
+                    {soil_data['npk_status']} as npk_status,
+                    '{soil_data['ph_level']}' as ph_level
+            """)
+        
+        # Format query with actual data
+        formatted_query = query.format(
+            price_data='\nUNION ALL\n'.join(price_data_list),
+            soil_data='\nUNION ALL\n'.join(soil_data_list),
+            irrigation_coverage=irrigation_data['irrigation_coverage'],
+            water_availability=irrigation_data['water_availability_score']
+        )
+        
+        # Create view table
+        view_table = Table(title=f"[bold cyan]Market Analysis View - {state}")
+        
+        # Add columns
+        columns = [
+            ("Crop", "left", "cyan"),
+            ("Current Price (₹/q)", "right", "green"),
+            ("Avg Price (₹/q)", "right", "green"),
+            ("Volatility (%)", "right", "yellow"),
+            ("Seasonal Strength", "right", "cyan"),
+            ("Soil Health", "right", "magenta"),
+            ("NPK Status", "right", "magenta"),
+            ("pH Level", "center", "magenta"),
+            ("Irrigation (%)", "right", "blue"),
+            ("Water Score", "right", "blue"),
+            ("Risk Level", "center", "red")
+        ]
+        
+        for col_name, justify, style in columns:
+            view_table.add_column(col_name, justify=justify, style=style)
+        
+        # Add data rows
+        for current_crop in crops:
+            price_data = get_price_trends(current_crop, state)
+            soil_data = get_soil_suitability(current_crop, state)
+            irrigation_data = get_irrigation_status(state)
+            
+            if not all([price_data, soil_data, irrigation_data]):
+                continue
+                
+            market_risk = calculate_market_risk(price_data, soil_data, irrigation_data)
+            risk_level = "High Risk" if market_risk > 70 else "Medium Risk" if market_risk > 40 else "Low Risk"
+            
+            view_table.add_row(
+                current_crop,
+                f"₹{price_data['current_price']:,.2f}",
+                f"₹{price_data['avg_price']:,.2f}",
+                f"{price_data['volatility'] * 100:.1f}",
+                f"{price_data['seasonal_strength']:.2f}",
+                f"{soil_data['soil_health_score']:.1f}",
+                f"{soil_data['npk_status']:.1f}",
+                str(soil_data['ph_level']),
+                f"{irrigation_data['irrigation_coverage']:.1f}",
+                f"{irrigation_data['water_availability_score']:.1f}",
+                risk_level
+            )
+        
+        # Display the view
+        console.print("\n")
+        console.print(view_table)
+        
+        # Return data as DataFrame for further analysis
+        return pd.DataFrame({
+            'query': formatted_query,
+            'data': [row for row in view_table.rows]
+        })
+        
+    except Exception as e:
+        console.print(f"[bold red]Error creating market analysis view: {e}[/bold red]")
+        return None
 
 def main():
     # Example coordinates (Visakhapatnam)
@@ -522,6 +592,11 @@ def main():
     print(f"\nLocation Details:")
     print(f"Address: {address}")
     print(f"State: {state}")
+    
+    # Create and display the market analysis view
+    print("\nComprehensive Market Analysis View")
+    print("=" * 50)
+    market_view = create_market_analysis_view(state)
     
     # Generate state-wide analysis
     print_location_analysis(state)

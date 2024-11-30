@@ -4,6 +4,7 @@ import numpy as np
 from datetime import datetime
 from geopy.geocoders import Nominatim
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -350,12 +351,183 @@ class FertilizerRecommendationSystem:
         district = location.raw['address'].get('state_district')
         return location.address, state, district
 
+    def create_fertilizer_analysis_view(self, location, crop, plan):
+        """Create a comprehensive view combining all fertilizer analysis data"""
+        try:
+            # Create SQL-like view combining all tables
+            query = """
+            CREATE VIEW fertilizer_analysis AS
+            WITH soil_health AS (
+                SELECT 
+                    'Nitrogen' as parameter,
+                    {nitrogen} as current_level,
+                    CASE 
+                        WHEN {nitrogen} < 30 THEN 'Low'
+                        WHEN {nitrogen} < 60 THEN 'Medium'
+                        ELSE 'High'
+                    END as status
+                UNION ALL
+                SELECT 
+                    'Phosphorous',
+                    {phosphorous},
+                    CASE 
+                        WHEN {phosphorous} < 30 THEN 'Low'
+                        WHEN {phosphorous} < 60 THEN 'Medium'
+                        ELSE 'High'
+                    END
+                UNION ALL
+                SELECT 
+                    'Potassium',
+                    {potassium},
+                    CASE 
+                        WHEN {potassium} < 30 THEN 'Low'
+                        WHEN {potassium} < 60 THEN 'Medium'
+                        ELSE 'High'
+                    END
+                UNION ALL
+                SELECT 'pH Level', {ph}, {ph}
+            ),
+            nutrient_requirements AS (
+                SELECT 
+                    nutrient,
+                    amount,
+                    CASE 
+                        WHEN amount > 50 THEN 'High'
+                        WHEN amount > 25 THEN 'Medium'
+                        ELSE 'Low'
+                    END as priority
+                FROM (
+                    SELECT 'N' as nutrient, {n_req} as amount
+                    UNION ALL SELECT 'P', {p_req}
+                    UNION ALL SELECT 'K', {k_req}
+                )
+            ),
+            application_schedule AS (
+                SELECT 
+                    stage,
+                    n_amount,
+                    p_amount,
+                    k_amount
+                FROM (
+                    {schedule_data}
+                )
+            ),
+            fertilizer_recommendations AS (
+                SELECT 
+                    fertilizer,
+                    match_score,
+                    effectiveness_score,
+                    application_rate
+                FROM (
+                    {fertilizer_data}
+                )
+            ),
+            cost_analysis AS (
+                SELECT 
+                    {total_cost} as total_cost,
+                    {total_cost}/{stages} as cost_per_stage
+            )
+            """
+            
+            # Format query with actual values
+            formatted_query = query.format(
+                nitrogen=plan['soil_health']['nitrogen'],
+                phosphorous=plan['soil_health']['phosphorous'],
+                potassium=plan['soil_health']['potassium'],
+                ph=plan['soil_health']['ph'],
+                n_req=plan['nutrient_requirements']['N'],
+                p_req=plan['nutrient_requirements']['P'],
+                k_req=plan['nutrient_requirements']['K'],
+                schedule_data='\nUNION ALL\n'.join([
+                    f"SELECT '{stage['stage']}', {stage['nutrients']['N']}, {stage['nutrients']['P']}, {stage['nutrients']['K']}"
+                    for stage in plan['application_schedule']
+                ]),
+                fertilizer_data='\nUNION ALL\n'.join([
+                    f"SELECT '{rec['fertilizer']}', {rec['match_score']}, {rec['effectiveness_score']}, {rec['application_rate']}"
+                    for rec in plan['recommended_fertilizers']
+                ]),
+                total_cost=plan['estimated_cost'],
+                stages=len(plan['application_schedule'])
+            )
+            
+            # Create comprehensive view table
+            view_table = Table(title=f"[bold cyan]Fertilizer Analysis View for {crop} in {location}[/bold cyan]")
+            
+            # Add columns for all metrics
+            view_table.add_column("Category", style="cyan", width=20)
+            view_table.add_column("Parameter", style="green", width=20)
+            view_table.add_column("Value", justify="right", width=15)
+            view_table.add_column("Status/Notes", justify="center", width=15)
+            
+            # Add soil health data
+            for param, value in plan['soil_health'].items():
+                status = "N/A"
+                if param != 'ph':
+                    num_value = float(value)
+                    status = "Low" if num_value < 30 else "Medium" if num_value < 60 else "High"
+                view_table.add_row(
+                    "Soil Health",
+                    param.capitalize(),
+                    f"{value}",
+                    status
+                )
+            
+            # Add nutrient requirements
+            for nutrient, amount in plan['nutrient_requirements'].items():
+                priority = "High" if amount > 50 else "Medium" if amount > 25 else "Low"
+                view_table.add_row(
+                    "Nutrient Requirements",
+                    f"Required {nutrient}",
+                    f"{amount:.1f} kg/ha",
+                    priority
+                )
+            
+            # Add application schedule
+            for stage in plan['application_schedule']:
+                for nutrient, amount in stage['nutrients'].items():
+                    view_table.add_row(
+                        "Application Schedule",
+                        f"{stage['stage']} - {nutrient}",
+                        f"{amount:.1f} kg/ha",
+                        "Scheduled"
+                    )
+            
+            # Add fertilizer recommendations
+            for rec in plan['recommended_fertilizers']:
+                view_table.add_row(
+                    "Recommendations",
+                    rec['fertilizer'],
+                    f"{rec['application_rate']} kg/ha",
+                    f"Score: {rec['match_score']:.2f}"
+                )
+            
+            # Add cost analysis
+            view_table.add_row(
+                "Cost Analysis",
+                "Total Cost",
+                f"₹{plan['estimated_cost']:,.2f}",
+                "Per Hectare"
+            )
+            view_table.add_row(
+                "Cost Analysis",
+                "Cost per Stage",
+                f"₹{plan['estimated_cost']/len(plan['application_schedule']):,.2f}",
+                "Per Stage"
+            )
+            
+            # Display the comprehensive view
+            console.print("\n")
+            console.print(view_table)
+            
+        except Exception as e:
+            console.print(f"[bold red]Error creating fertilizer analysis view: {e}[/bold red]")
+            console.print(f"[yellow]Query attempted:[/yellow]\n{formatted_query}")
+
 def main():
     recommender = FertilizerRecommendationSystem()
     lat = 17.6868
     lon = 83.2185
     
-    # Using the static method correctly
     address, state, district = FertilizerRecommendationSystem.get_location_details(lat, lon)
     location = district
     crop = input("Enter the crop name : ")
@@ -365,8 +537,12 @@ def main():
     if 'error' in plan:
         print(f"Error: {plan['error']}")
         return
-        
-    console.print(f"[bold blue]\nFertilizer Plan for {crop} in {location}[/bold blue]")
+    
+    # Display comprehensive analysis view
+    recommender.create_fertilizer_analysis_view(location, crop, plan)
+    
+    # Original output
+    console.print(f"\n[bold blue]Fertilizer Plan Summary for {crop} in {location}[/bold blue]")
     console.print("[bold green]\nSoil Health:[/bold green]")
     for nutrient, value in plan['soil_health'].items():
         print(f"{nutrient.capitalize()}: {value}")

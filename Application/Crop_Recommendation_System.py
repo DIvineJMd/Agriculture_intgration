@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -11,6 +12,7 @@ class CropRecommendationSystem:
         """Initialize the crop recommendation system"""
         self.db_path = "WareHouse"
         self.crop_requirements = self._load_crop_requirements()
+        self._create_comprehensive_view()
     def _load_crop_requirements(self):
         """Load crop requirements from the database"""
         try:
@@ -375,132 +377,93 @@ class CropRecommendationSystem:
             print(f"Error getting states: {e}")
             return None
         
-    def _create_crop_nutrient_requirements_view(self):
-        """Create a SQL view for crop nutrient requirements with optimal ranges."""
+    def _create_comprehensive_view(self):
+        """Create a comprehensive SQL view for crop recommendations"""
         try:
             conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
             cursor = conn.cursor()
             
-            # SQL statement to create the view
+            # SQL statement to create the comprehensive view
             query = """
-            CREATE VIEW IF NOT EXISTS crop_nutrient_requirements AS
+            CREATE VIEW IF NOT EXISTS comprehensive_crop_view AS
             SELECT 
-                label AS crop_name,
-                AVG(N) * 0.8 AS N_low,
-                AVG(N) AS N_medium,
-                AVG(N) * 1.2 AS N_high,
-                AVG(P) * 0.8 AS P_low,
-                AVG(P) AS P_medium,
-                AVG(P) * 1.2 AS P_high,
-                AVG(K) * 0.8 AS K_low,
-                AVG(K) AS K_medium,
-                AVG(K) * 1.2 AS K_high,
-                AVG(rainfall) AS average_rainfall,
-                AVG(ph) AS average_ph
-            FROM transformed_crop_data
-            GROUP BY label;
-            """
-            
-            cursor.execute(query)
-            conn.commit()
-            conn.close()
-            
-            console.print("[bold green]View 'crop_nutrient_requirements' created successfully.[/bold green]")
-            
-        except sqlite3.Error as e:
-            console.print(f"[bold red]Error creating crop nutrient requirements view: {e}[/bold red]")
-        except Exception as e:
-            console.print(f"[bold red]Unexpected error: {e}[/bold red]")
-    
-    def _create_crop_pH_categories_view(self):
-        """Create a SQL view for categorizing crops based on pH levels."""
-        try:
-            conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
-            cursor = conn.cursor()
-            
-            # SQL statement to create the view
-            query = """
-            CREATE VIEW IF NOT EXISTS crop_pH_categories AS
-            SELECT 
-                label AS crop_name,
-                AVG(ph) AS average_ph,
+                tcd.label AS crop_name,
+                AVG(tcd.N) * 0.8 AS N_low,
+                AVG(tcd.N) AS N_medium,
+                AVG(tcd.N) * 1.2 AS N_high,
+                AVG(tcd.P) * 0.8 AS P_low,
+                AVG(tcd.P) AS P_medium,
+                AVG(tcd.P) * 1.2 AS P_high,
+                AVG(tcd.K) * 0.8 AS K_low,
+                AVG(tcd.K) AS K_medium,
+                AVG(tcd.K) * 1.2 AS K_high,
+                AVG(tcd.rainfall) AS average_rainfall,
+                AVG(tcd.ph) AS average_ph,
                 CASE
-                    WHEN AVG(ph) < 5.5 THEN 'Strongly Acidic'
-                    WHEN AVG(ph) >= 5.5 AND AVG(ph) < 6.5 THEN 'Moderately Acidic'
-                    WHEN AVG(ph) >= 6.5 AND AVG(ph) < 7.5 THEN 'Neutral'
-                    WHEN AVG(ph) >= 7.5 AND AVG(ph) < 8.5 THEN 'Slightly Alkaline'
+                    WHEN AVG(tcd.ph) < 5.5 THEN 'Strongly Acidic'
+                    WHEN AVG(tcd.ph) >= 5.5 AND AVG(tcd.ph) < 6.5 THEN 'Moderately Acidic'
+                    WHEN AVG(tcd.ph) >= 6.5 AND AVG(tcd.ph) < 7.5 THEN 'Neutral'
+                    WHEN AVG(tcd.ph) >= 7.5 AND AVG(tcd.ph) < 8.5 THEN 'Slightly Alkaline'
                     ELSE 'Moderately Alkaline'
-                END AS pH_category
-            FROM transformed_crop_data
-            GROUP BY label;
+                END AS pH_category,
+                GROUP_CONCAT(DISTINCT CASE
+                    WHEN tcd.label IN ('rice', 'maize', 'cotton', 'sugarcane', 'sorghum', 
+                                       'bajra', 'soybean', 'groundnut', 'pulses', 'millet') THEN 'Kharif'
+                    WHEN tcd.label IN ('wheat', 'chickpea', 'mustard', 'barley', 'peas', 
+                                       'linseed', 'oats', 'lentils', 'gram', 'sunflower') THEN 'Rabi'
+                    WHEN tcd.label IN ('watermelon', 'muskmelon', 'cucumber', 'pumpkin', 
+                                       'fodder', 'summer maize', 'cowpea', 'okra', 'tomato') THEN 'Zaid'
+                END) AS suitable_seasons
+            FROM transformed_crop_data tcd
+            GROUP BY tcd.label;
             """
             
             cursor.execute(query)
             conn.commit()
             conn.close()
             
-            console.print("[bold green]View 'crop_pH_categories' created successfully.[/bold green]")
+            console.print("[bold green]View 'comprehensive_crop_view' created successfully.[/bold green]")
             
         except sqlite3.Error as e:
-            console.print(f"[bold red]Error creating crop pH categories view: {e}[/bold red]")
+            console.print(f"[bold red]Error creating comprehensive crop view: {e}[/bold red]")
         except Exception as e:
             console.print(f"[bold red]Unexpected error: {e}[/bold red]")
 
-
-    def _create_crop_season_suitability_view(self):
-        """Create a SQL view for mapping crops to their suitable growing seasons."""
+    def print_comprehensive_view(self):
+        """Print the comprehensive crop view in a tabular format"""
         try:
             conn = sqlite3.connect(f'{self.db_path}/transformed_crop_data.db')
-            cursor = conn.cursor()
-            
-            # SQL statement to create the view
-            query = """
-            CREATE VIEW IF NOT EXISTS crop_season_suitability AS
-            SELECT 
-                label AS crop_name,
-                GROUP_CONCAT(DISTINCT season) AS suitable_seasons
-            FROM (
-                SELECT 
-                    label,
-                    'Kharif' AS season
-                FROM transformed_crop_data
-                WHERE label IN ('rice', 'maize', 'cotton', 'sugarcane', 'sorghum', 
-                                'bajra', 'soybean', 'groundnut', 'pulses', 'millet')
-                UNION
-                SELECT 
-                    label,
-                    'Rabi' AS season
-                FROM transformed_crop_data
-                WHERE label IN ('wheat', 'chickpea', 'mustard', 'barley', 'peas', 
-                                'linseed', 'oats', 'lentils', 'gram', 'sunflower')
-                UNION
-                SELECT 
-                    label,
-                    'Zaid' AS season
-                FROM transformed_crop_data
-                WHERE label IN ('watermelon', 'muskmelon', 'cucumber', 'pumpkin', 
-                                    'fodder', 'summer maize', 'cowpea', 'okra', 'tomato')
-            )
-            GROUP BY label;
-            """
-            
-            cursor.execute(query)
-            conn.commit()
+            query = "SELECT * FROM comprehensive_crop_view"
+            data = pd.read_sql_query(query, conn)
             conn.close()
             
-            console.print("[bold green]View 'crop_season_suitability' created successfully.[/bold green]")
+            if data.empty:
+                console.print("[bold red]No data found in comprehensive crop view.[/bold red]")
+                return
+            
+            table = Table(title="Comprehensive Crop View")
+            
+            # Add columns
+            for column in data.columns:
+                table.add_column(column, justify="right", style="cyan", no_wrap=True)
+            
+            # Add rows
+            for _, row in data.iterrows():
+                table.add_row(*[str(value) for value in row])
+            
+            console.print(table)
             
         except sqlite3.Error as e:
-            console.print(f"[bold red]Error creating crop seasonal suitability view: {e}[/bold red]")
+            console.print(f"[bold red]Error printing comprehensive crop view: {e}[/bold red]")
         except Exception as e:
             console.print(f"[bold red]Unexpected error: {e}[/bold red]")
-
-
-
 
 def main():
     # Initialize the system
     recommender = CropRecommendationSystem()
+    
+    # Print the comprehensive view for verification
+    recommender.print_comprehensive_view()
     
     # Get season input
     seasons = ['Kharif', 'Rabi', 'Zaid']
@@ -563,6 +526,5 @@ def main():
     else:
         console.print("[bold red]No moderately suitable crops found for this location and season[/bold red]")
 
-        print("No moderately suitable crops found for this season")
 if __name__ == "__main__":
     main()
