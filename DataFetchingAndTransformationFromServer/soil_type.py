@@ -54,7 +54,7 @@ def fetch_and_transform_soil_data():
         data = federator.query_server(soil_server, query)
         
         if data is None:
-            print("Failed to fetch soil types data from the server")
+            print("[bold red]Failed to fetch soil types data from the server[bold red]")
             return
         
         # Convert to DataFrame
@@ -108,7 +108,7 @@ def fetch_and_transform_soil_data():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_soil_type_states_state ON soil_type_states(state)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_soil_type_states_soil_type_id ON soil_type_states(soil_type_id)')
         
-        print("Soil types database created successfully!")
+        print("[bold yellow]Soil types database extracted successfully![bold yellow]")
         
         # Verify the data
         cursor.execute("SELECT COUNT(*) FROM soil_types")

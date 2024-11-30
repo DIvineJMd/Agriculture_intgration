@@ -386,7 +386,7 @@ def print_location_analysis(state):
         # Get detailed market insights
         insights = get_market_insights(crop, state)
         if insights:
-            print("\nMarket Intelligence:")
+            print("\n[bold cyan]Market Intelligence:[/bold cyan]")
             print(f"- Market Risk Score: {insights['market_summary']['market_risk_score']:.1f}/100")
             print(f"- Soil Suitability Score: {insights['market_summary']['soil_suitability']:.1f}/100")
             

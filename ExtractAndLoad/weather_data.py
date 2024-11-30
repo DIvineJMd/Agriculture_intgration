@@ -417,7 +417,7 @@ def main():
     # Close database connection
     conn.close()
     
-    print("Weather data has been successfully stored in the database!")
+    print("[bold cyan]Weather data has been successfully extracted![\bold cyan]")
 
 
 if __name__ == "__main__":

@@ -90,11 +90,11 @@ def select_from_mui_dropdown(driver, dropdown_selector, target_text, is_xpath=Tr
                 best_match = option
         
         if best_match and best_similarity > 0.5:  # Threshold for minimum similarity
-            logger.info(f"Best match found: '{best_match.text}' with similarity {best_similarity:.3f}")
+            logger.info(f"[bold yellow]Best match found: '{best_match.text}' with similarity {best_similarity:.3f}[/bold yellow]") 
             driver.execute_script("arguments[0].click();", best_match)
             return True
         else:
-            logger.error(f"No good match found for '{target_text}'. Best similarity was {best_similarity:.3f}")
+            logger.error(f"[bold red]No good match found for '{target_text}'. Best similarity was {best_similarity:.3f}[/bold red]")
             return False
             
     except Exception as e:

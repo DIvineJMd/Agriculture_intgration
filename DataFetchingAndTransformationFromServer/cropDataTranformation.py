@@ -75,9 +75,9 @@ def fetch_and_transform_data():
             # Commit and close
             conn.commit()
             conn.close()
-            print("Transformed data saved successfully to the database.")
+            print("[bold yellow]Data succesfully transformed.[bold yellow]")
         else:
-            print("Failed to fetch data from the server.")
+            print("[bold red]Failed to fetch data from the server.[/bold red]")
             
     except Exception as e:
         print(f"Error in crop data transformation: {str(e)}")

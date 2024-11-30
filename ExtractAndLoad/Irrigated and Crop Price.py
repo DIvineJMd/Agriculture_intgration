@@ -58,10 +58,10 @@ def create_databases():
         crop_prices_conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_date ON crop_prices(Arrival_Date)')
         crop_prices_conn.execute('CREATE INDEX IF NOT EXISTS idx_crop_prices_state ON crop_prices(State)')
         
-        print("Crop prices database created successfully!")
+        print("[bold cyan]Crop prices database accessed successfully![\bold cyan]")
         
     except Exception as e:
-        print(f"Error creating crop prices database: {str(e)}")
+        print(f"[bold red]Error creating crop prices database: {str(e)} [\bold red]")
     finally:
         crop_prices_conn.close()
     
@@ -78,10 +78,10 @@ def create_databases():
         irrigated_area_conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_year ON irrigated_area(Year)')
         irrigated_area_conn.execute('CREATE INDEX IF NOT EXISTS idx_irrigated_area_state ON irrigated_area(State_Name)')
         
-        print("Irrigated area database created successfully!")
+        print("[bold cyan]Irrigated area database created successfully![\bold cyan]")
         
     except Exception as e:
-        print(f"Error creating irrigated area database: {str(e)}")
+        print(f"[bold red]Error creating irrigated area database: {str(e)}[\bold red]")
     finally:
         irrigated_area_conn.close()
 

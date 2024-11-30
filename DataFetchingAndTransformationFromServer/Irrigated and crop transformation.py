@@ -97,7 +97,7 @@ def transform_crop_prices(federator, crop_server, target_conn):
     data = federator.query_server(crop_server, query)
     
     if data is None:
-        print("Failed to fetch crop prices data from the server")
+        print("[bold red]Failed to fetch crop prices data from the server[/bold red]")
         return
     
     # Convert to DataFrame
@@ -167,7 +167,7 @@ def transform_irrigation_data(federator, irr_server, target_conn):
     data = federator.query_server(irr_server, query)
     
     if data is None:
-        print("Failed to fetch irrigation data from the server")
+        print("[bold red]Failed to fetch irrigation data from the server[/bold red]")
         return
     
     # Convert to DataFrame
@@ -251,7 +251,7 @@ def main():
     crop_target_conn.close()
     irr_target_conn.close()
     
-    print("Crop and irrigation data transformation completed successfully!")
+    print("[bold yellow]Crop and irrigation data transformation completed successfully![/bold yellow]")
 
 if __name__ == "__main__":
     main()
