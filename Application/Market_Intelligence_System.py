@@ -1,7 +1,8 @@
 import sqlite3
 import pandas as pd
+from datetime import datetime, timedelta
 import numpy as np
-import os
+from geopy.geocoders import Nominatim
 from rich.console import Console
 from rich.table import Table
 
@@ -588,9 +589,6 @@ def main():
         print("Could not determine state location. Please check your connection.")
         return
     
-    # Print recommendations
-    state = recommendations['location_details']['state']
-    print(f"\nCrop Recommendations for {state}")
     print(f"\nLocation Details:")
     print(f"Address: {address}")
     print(f"State: {state}")
