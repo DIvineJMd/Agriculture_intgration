@@ -11,7 +11,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-#  badal de ye, ports sabki unique rakhio
 DB_FILE = "database/macro_nutrients.db"
 ZMQ_PORT = 5555
 
