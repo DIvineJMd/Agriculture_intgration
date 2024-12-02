@@ -10,76 +10,76 @@ echo                          Agricultural Advisor System
 echo ===============================================================================
 echo.
 
-@REM :CHECK_DIRECTORIES
-@REM echo [*] Checking required directories...
-@REM if exist "ExtractAndLoad" (
-@REM     echo [√] ExtractAndLoad directory found
-@REM ) else (
-@REM     echo [X] ExtractAndLoad directory not found
-@REM     pause
-@REM     exit /b 1
-@REM )
+:CHECK_DIRECTORIES
+echo [*] Checking required directories...
+if exist "ExtractAndLoad" (
+    echo [√] ExtractAndLoad directory found
+) else (
+    echo [X] ExtractAndLoad directory not found
+    pause
+    exit /b 1
+)
 
-@REM if exist "DataFetchingAndTransformationFromServer" (
-@REM     echo [√] DataFetchingAndTransformationFromServer directory found
-@REM ) else (
-@REM     echo [X] DataFetchingAndTransformationFromServer directory not found
-@REM     pause
-@REM     exit /b 1
-@REM )
-@REM echo.
+if exist "DataFetchingAndTransformationFromServer" (
+    echo [√] DataFetchingAndTransformationFromServer directory found
+) else (
+    echo [X] DataFetchingAndTransformationFromServer directory not found
+    pause
+    exit /b 1
+)
+echo.
 
-@REM :RUN_EXTRACTION
-@REM echo ===============================================================================
-@REM echo                              Data Extraction Phase
-@REM echo ===============================================================================
-@REM echo.
+:RUN_EXTRACTION
+echo ===============================================================================
+echo                              Data Extraction Phase
+echo ===============================================================================
+echo.
 
-@REM echo [*] Running weather_data.py...
-@REM python ExtractAndLoad\weather_data.py
-@REM if errorlevel 1 (
-@REM     echo [X] Failed to complete weather_data.py
-@REM     pause
-@REM     exit /b 1
-@REM )
-@REM echo [√] Successfully completed weather_data.py
-@REM echo.
+echo [*] Running weather_data.py...
+python ExtractAndLoad\weather_data.py
+if errorlevel 1 (
+    echo [X] Failed to complete weather_data.py
+    pause
+    exit /b 1
+)
+echo [√] Successfully completed weather_data.py
+echo.
 
-@REM echo [*] Running soilhealtdata.py...
-@REM python ExtractAndLoad\soilhealtdata.py
-@REM if errorlevel 1 (
-@REM     echo [X] Failed to complete soilhealtdata.py
-@REM     pause
-@REM     exit /b 1
-@REM )
-@REM echo [√] Successfully completed soilhealtdata.py
-@REM echo.
+echo [*] Running soilhealtdata.py...
+python ExtractAndLoad\soilhealtdata.py
+if errorlevel 1 (
+    echo [X] Failed to complete soilhealtdata.py
+    pause
+    exit /b 1
+)
+echo [√] Successfully completed soilhealtdata.py
+echo.
 
-@REM :RUN_TRANSFORMATION
-@REM echo ===============================================================================
-@REM echo                           Data Transformation Phase
-@REM echo ===============================================================================
-@REM echo.
+:RUN_TRANSFORMATION
+echo ===============================================================================
+echo                           Data Transformation Phase
+echo ===============================================================================
+echo.
 
-@REM set "scripts=cropDataTranformation.py fertilizer_data.py "Irrigated and crop transformation.py" soil_type.py soilData.py weatherTransformation.py"
+set "scripts=cropDataTranformation.py fertilizer_data.py "Irrigated and crop transformation.py" soil_type.py soilData.py weatherTransformation.py"
 
-@REM for %%s in (%scripts%) do (
-@REM     echo [*] Running %%s...
-@REM     if exist "DataFetchingAndTransformationFromServer\%%~s" (
-@REM         python "DataFetchingAndTransformationFromServer\%%~s"
-@REM         if errorlevel 1 (
-@REM             echo [X] Failed to complete %%s
-@REM             pause
-@REM             exit /b 1
-@REM         )
-@REM         echo [√] Successfully completed %%s
-@REM         echo.
-@REM     ) else (
-@REM         echo [X] File not found: DataFetchingAndTransformationFromServer\%%~s
-@REM         pause
-@REM         exit /b 1
-@REM     )
-@REM )
+for %%s in (%scripts%) do (
+    echo [*] Running %%s...
+    if exist "DataFetchingAndTransformationFromServer\%%~s" (
+        python "DataFetchingAndTransformationFromServer\%%~s"
+        if errorlevel 1 (
+            echo [X] Failed to complete %%s
+            pause
+            exit /b 1
+        )
+        echo [√] Successfully completed %%s
+        echo.
+    ) else (
+        echo [X] File not found: DataFetchingAndTransformationFromServer\%%~s
+        pause
+        exit /b 1
+    )
+)
 
 :SHOW_MENU
 cls
