@@ -159,13 +159,13 @@ class NvidiaLLMQueryGenerator:
             messages = [
                 {"role": "system", "content": """
 You are an agricultural database expert. Generate SQL queries based on the schema provided.
-IMPORTANT: Return ONLY a single JSON object with no additional text, markdown, or explanations.
-Format:
+Return ONLY a JSON object in this exact format, with no additional text or explanation:
 {
     "database": "database_name",
     "query": "single_line_sql_query",
     "explanation": "brief explanation"
-}"""},
+}
+"""},
                 {"role": "user", "content": self.system_prompt + "\n\nQuestion: " + user_question}
             ]
             
@@ -182,13 +182,9 @@ Format:
             
             # Clean up the response
             try:
-                # Remove markdown code blocks if present
-                if response_content.startswith('```') and response_content.endswith('```'):
-                    response_content = response_content.strip('`')
-                
-                # Find the first JSON object
+                # Find the JSON content
                 json_start = response_content.find('{')
-                json_end = response_content.find('}', json_start) + 1
+                json_end = response_content.rfind('}') + 1
                 
                 if json_start != -1 and json_end != -1:
                     json_str = response_content[json_start:json_end]
@@ -268,36 +264,31 @@ Return ONLY the indices as a comma-separated list, e.g.: "0,3,5" or "2,4" or "1"
             return []
 
     def execute_query(self, query_info: Dict[str, str]) -> Optional[pd.DataFrame]:
-        """Execute the generated SQL query"""
+        """Execute the generated SQL query with a limit if the result set is too large"""
         try:
-            # Handle multi-database queries
-            if isinstance(query_info['database'], list):
-                results = {}
-                for db in query_info['database']:
-                    db_file = self.available_databases.get(db)
-                    if not db_file:
-                        raise ValueError(f"Database {db} not found")
-                    
-                    conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-                    try:
-                        query = query_info['queries'][db]  # Get query for this specific database
-                        results[db] = pd.read_sql_query(query, conn)
-                    finally:
-                        conn.close()
-                return results
-            else:
-                # Handle single database query (existing code)
-                db_file = self.available_databases.get(query_info['database'])
-                if not db_file:
-                    raise ValueError(f"Database {query_info['database']} not found")
+            db_file = self.available_databases.get(query_info['database'])
+            if not db_file:
+                raise ValueError(f"Database {query_info['database']} not found")
 
-                conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-                try:
-                    result = pd.read_sql_query(query_info['query'], conn)
-                    return result
-                finally:
-                    conn.close()
-                    
+            conn = sqlite3.connect(os.path.join(self.db_path, db_file))
+            try:
+                query = query_info['query']
+                
+                # Execute the query to get the initial result set
+                result = pd.read_sql_query(query, conn)
+                
+                # Check if the result set is too large
+                if len(result) > 1000:  # Adjust the threshold as needed
+                    print("Result set too large, applying LIMIT to the query.")
+                    # Modify the query to include a LIMIT clause
+                    if 'LIMIT' not in query.upper():
+                        query += ' LIMIT 100'  # Add a reasonable limit
+                    result = pd.read_sql_query(query, conn)
+                
+                return result
+            finally:
+                conn.close()
+                
         except sqlite3.Error as e:
             print(f"Error executing query: {e}")
             return None
