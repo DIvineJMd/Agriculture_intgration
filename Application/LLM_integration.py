@@ -143,8 +143,15 @@ class NvidiaLLMQueryGenerator:
                 print(f"Error loading schema for {db_name}: {e}")
         return schemas
     
-    def connect_db(self, query):
-        self.fed.query_server(query['database'], query['query'])
+    def connect_db(self, query_info):
+        """Connect to database and execute query"""
+        try:
+            if isinstance(query_info, dict) and 'database' in query_info and 'query' in query_info:
+                self.fed.query_server(query_info['database'], query_info['query'])
+            else:
+                print("") #Invalid query information provided
+        except Exception as e:
+            print(f"")#Error connecting to database: {e}
 
     def _get_default_system_prompt(self) -> str:
         """Generate system prompt with database schemas"""
@@ -281,40 +288,34 @@ Return ONLY the indices as a comma-separated list, e.g.: "0,3,5" or "2,4" or "1"
             return []
 
     def execute_query(self, query_info: Dict[str, str]) -> Optional[pd.DataFrame]:
-        """Execute the generated SQL query"""
+        """Execute the generated SQL query with a limit if the result set is too large"""
         try:
-            # Handle multi-database queries
-            if isinstance(query_info['database'], list):
-                results = {}
-                for db in query_info['database']:
-                    db_file = self.available_databases.get(db)
-                    if not db_file:
-                        raise ValueError(f"Database {db} not found")
-                    
-                    conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-                    try:
-                        query = query_info['queries'][db]  # Get query for this specific database
-                        results[db] = pd.read_sql_query(query, conn)
-                    finally:
-                        conn.close()
-                return results
-            else:
-                # Handle single database query (existing code)
-                db_file = self.available_databases.get(query_info['database'])
-                if not db_file:
-                    raise ValueError(f"Database {query_info['database']} not found")
+            db_file = self.available_databases.get(query_info['database'])
+            if not db_file:
+                raise ValueError(f"Database {query_info['database']} not found")
 
-                conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-                try:
-                    result = pd.read_sql_query(query_info['query'], conn)
-                    return result
-                finally:
-                    conn.close()
-                    
+            conn = sqlite3.connect(os.path.join(self.db_path, db_file))
+            try:
+                query = query_info['query']
+                
+                # Execute the query to get the initial result set
+                result = pd.read_sql_query(query, conn)
+                
+                # Check if the result set is too large
+                if len(result) > 1000:  # Adjust the threshold as needed
+                    print("Result set too large, applying LIMIT to the query.")
+                    # Modify the query to include a LIMIT clause
+                    if 'LIMIT' not in query.upper():
+                        query += ' LIMIT 100'  # Add a reasonable limit
+                    result = pd.read_sql_query(query, conn)
+                
+                return result
+            finally:
+                conn.close()
+                
         except sqlite3.Error as e:
             print(f"Error executing query: {e}")
-            return None
-
+        return None
     async def format_results_with_context(self, results: List[Dict], query_info: Dict) -> str:
         """Convert query results to natural language using the LLM with conversation context"""
         try:
