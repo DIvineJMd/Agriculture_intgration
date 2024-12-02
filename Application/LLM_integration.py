@@ -5,7 +5,15 @@ import pandas as pd
 import os
 from datetime import datetime
 from openai import OpenAI
+from federator import DatabaseFederator
 
+serv_configs = [
+    {"db": "crop_prices", "host": '34.27.98.163', "port": 2222},
+    {"db": "soil_types", "host": '34.131.26.86', "port": 5556},
+    {"db": "irrigated_area", "host": '162.222.176.148', "port": 4444},
+    {"db": "fertilizer_prediction", "host": '162.222.176.148', "port": 3336},
+    {"db": "crop_data", "host": '34.32.69.217', "port": 1113},
+]
 
 class QueryHistory:
     def __init__(self):
@@ -104,6 +112,7 @@ class NvidiaLLMQueryGenerator:
 
         self.table_schemas = self._load_table_schemas()
         self.system_prompt = self._get_default_system_prompt()
+        self.fed = DatabaseFederator(serv_configs)
 
         # Add both chat and query history
         self.chat_history = ChatHistory()
@@ -133,6 +142,9 @@ class NvidiaLLMQueryGenerator:
             except sqlite3.Error as e:
                 print(f"Error loading schema for {db_name}: {e}")
         return schemas
+    
+    def connect_db(self, query):
+        self.fed.query_server(query['database'], query['query'])
 
     def _get_default_system_prompt(self) -> str:
         """Generate system prompt with database schemas"""
@@ -159,13 +171,13 @@ class NvidiaLLMQueryGenerator:
             messages = [
                 {"role": "system", "content": """
 You are an agricultural database expert. Generate SQL queries based on the schema provided.
-Return ONLY a JSON object in this exact format, with no additional text or explanation:
+IMPORTANT: Return ONLY a single JSON object with no additional text, markdown, or explanations.
+Format:
 {
     "database": "database_name",
     "query": "single_line_sql_query",
     "explanation": "brief explanation"
-}
-"""},
+}"""},
                 {"role": "user", "content": self.system_prompt + "\n\nQuestion: " + user_question}
             ]
             
@@ -182,9 +194,13 @@ Return ONLY a JSON object in this exact format, with no additional text or expla
             
             # Clean up the response
             try:
-                # Find the JSON content
+                # Remove markdown code blocks if present
+                if response_content.startswith('```') and response_content.endswith('```'):
+                    response_content = response_content.strip('`')
+                
+                # Find the first JSON object
                 json_start = response_content.find('{')
-                json_end = response_content.rfind('}') + 1
+                json_end = response_content.find('}', json_start) + 1
                 
                 if json_start != -1 and json_end != -1:
                     json_str = response_content[json_start:json_end]
@@ -198,6 +214,7 @@ Return ONLY a JSON object in this exact format, with no additional text or expla
                     
                     # Parse the JSON
                     query_info = json.loads(json_str)
+                    self.connect_db(query_info)
                     
                     # Clean up the query
                     if 'query' in query_info:
@@ -264,31 +281,36 @@ Return ONLY the indices as a comma-separated list, e.g.: "0,3,5" or "2,4" or "1"
             return []
 
     def execute_query(self, query_info: Dict[str, str]) -> Optional[pd.DataFrame]:
-        """Execute the generated SQL query with a limit if the result set is too large"""
+        """Execute the generated SQL query"""
         try:
-            db_file = self.available_databases.get(query_info['database'])
-            if not db_file:
-                raise ValueError(f"Database {query_info['database']} not found")
+            # Handle multi-database queries
+            if isinstance(query_info['database'], list):
+                results = {}
+                for db in query_info['database']:
+                    db_file = self.available_databases.get(db)
+                    if not db_file:
+                        raise ValueError(f"Database {db} not found")
+                    
+                    conn = sqlite3.connect(os.path.join(self.db_path, db_file))
+                    try:
+                        query = query_info['queries'][db]  # Get query for this specific database
+                        results[db] = pd.read_sql_query(query, conn)
+                    finally:
+                        conn.close()
+                return results
+            else:
+                # Handle single database query (existing code)
+                db_file = self.available_databases.get(query_info['database'])
+                if not db_file:
+                    raise ValueError(f"Database {query_info['database']} not found")
 
-            conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-            try:
-                query = query_info['query']
-                
-                # Execute the query to get the initial result set
-                result = pd.read_sql_query(query, conn)
-                
-                # Check if the result set is too large
-                if len(result) > 1000:  # Adjust the threshold as needed
-                    print("Result set too large, applying LIMIT to the query.")
-                    # Modify the query to include a LIMIT clause
-                    if 'LIMIT' not in query.upper():
-                        query += ' LIMIT 100'  # Add a reasonable limit
-                    result = pd.read_sql_query(query, conn)
-                
-                return result
-            finally:
-                conn.close()
-                
+                conn = sqlite3.connect(os.path.join(self.db_path, db_file))
+                try:
+                    result = pd.read_sql_query(query_info['query'], conn)
+                    return result
+                finally:
+                    conn.close()
+                    
         except sqlite3.Error as e:
             print(f"Error executing query: {e}")
             return None
