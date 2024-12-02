@@ -247,8 +247,8 @@ def main():
     # Example: Get recommendations from transformed database
     conn = sqlite3.connect('WareHouse/fertilizer_recommendation.db')
     recommendations = get_fertilizer_recommendations(conn)
-    print("\nTop Fertilizer Recommendations:")
-    print(recommendations.head())
+    # print("\nTop Fertilizer Recommendations:")
+    # print(recommendations.head())
     conn.close()
 
 if __name__ == "__main__":
