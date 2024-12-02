@@ -101,7 +101,8 @@ class NvidiaLLMQueryGenerator:
             'crop_data': 'transformed_crop_data.db',
             'fertilizer': 'fertilizer_recommendation.db',
             'weather_data': 'weather_data.db',
-            'soil_types': 'soil_types.db'
+            'soil_types': 'soil_types.db',
+            'multi': 'warehouse.db'
         }
 
         # Initialize NVIDIA API client
@@ -288,34 +289,52 @@ Return ONLY the indices as a comma-separated list, e.g.: "0,3,5" or "2,4" or "1"
             return []
 
     def execute_query(self, query_info: Dict[str, str]) -> Optional[pd.DataFrame]:
-        """Execute the generated SQL query with a limit if the result set is too large"""
+        """Execute SQL query, using warehouse.db for multi-database queries"""
         try:
-            db_file = self.available_databases.get(query_info['database'])
-            if not db_file:
-                raise ValueError(f"Database {query_info['database']} not found")
-
-            conn = sqlite3.connect(os.path.join(self.db_path, db_file))
-            try:
+            # Check if query involves multiple databases
+            if ',' in query_info['database'] or 'JOIN' in query_info['query'].upper() or 'UNION' in query_info['query'].upper():
+                # Use warehouse database for multi-database queries
+                # print(" Using warehouse database for multi-database query")
+                conn = sqlite3.connect(os.path.join(self.db_path, 'warehouse.db'))
+                
+                # Replace table references with warehouse prefixed names
                 query = query_info['query']
+                for db_name in self.available_databases.keys():
+                    # Replace table references like "database.table" with "database_table"
+                    query = query.replace(f"{db_name}.", f"{db_name}_")
                 
-                # Execute the query to get the initial result set
-                result = pd.read_sql_query(query, conn)
-                
-                # Check if the result set is too large
-                if len(result) > 1000:  # Adjust the threshold as needed
-                    print("Result set too large, applying LIMIT to the query.")
-                    # Modify the query to include a LIMIT clause
-                    if 'LIMIT' not in query.upper():
-                        query += ' LIMIT 100'  # Add a reasonable limit
+                try:
                     result = pd.read_sql_query(query, conn)
+                    if len(result) > 1000:
+                        print("Result set too large, applying LIMIT.")
+                        if 'LIMIT' not in query.upper():
+                            query += ' LIMIT 100'
+                        result = pd.read_sql_query(query, conn)
+                    return result
+                finally:
+                    conn.close()
+            else:
+                # Use original database for single database queries
+                db_file = self.available_databases.get(query_info['database'])
+                if not db_file:
+                    raise ValueError(f"Database {query_info['database']} not found")
+
+                conn = sqlite3.connect(os.path.join(self.db_path, db_file))
+                try:
+                    query = query_info['query']
+                    result = pd.read_sql_query(query, conn)
+                    if len(result) > 1000:
+                        print("Result set too large, applying LIMIT.")
+                        if 'LIMIT' not in query.upper():
+                            query += ' LIMIT 100'
+                        result = pd.read_sql_query(query, conn)
+                    return result
+                finally:
+                    conn.close()
                 
-                return result
-            finally:
-                conn.close()
-                
-        except sqlite3.Error as e:
+        except Exception as e:
             print(f"Error executing query: {e}")
-        return None
+            return None
     async def format_results_with_context(self, results: List[Dict], query_info: Dict) -> str:
         """Convert query results to natural language using the LLM with conversation context"""
         try:

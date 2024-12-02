@@ -1,20 +1,243 @@
-from openai import OpenAI
+import sqlite3
+import pandas as pd
+import os
+from typing import Dict, List
+from pathlib import Path
 
-client = OpenAI(
-  base_url = "https://integrate.api.nvidia.com/v1",
-  api_key = "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"
-)
+class DatabaseConsolidator:
+    def __init__(self, source_path: str = "WareHouse", warehouse_name: str = "warehouse.db"):
+        """Initialize the Database Consolidator
+        
+        Args:
+            source_path (str): Path to directory containing source databases
+            warehouse_name (str): Name of the consolidated warehouse database
+        """
+        self.source_path = Path(source_path)
+        self.warehouse_name = warehouse_name
+        self.warehouse_path = self.source_path / warehouse_name
+        
+        self.source_databases = {
+            'crop_prices': 'crop_prices_transformed.db',
+            'soil_health': 'soil_health_transformed.db',
+            'irrigation': 'irrigation_transformed.db',
+            'crop_data': 'transformed_crop_data.db',
+            'fertilizer': 'fertilizer_recommendation.db',
+            'weather_data': 'weather_data.db',
+            'soil_types': 'soil_types.db'
+        }
+        
+        # Create warehouse directory if it doesn't exist
+        self.source_path.mkdir(exist_ok=True)
 
-completion = client.chat.completions.create(
-  model="nvidia/llama-3.1-nemotron-70b-instruct",
-  messages=[{"role":"user","content":"Write a limerick about the wonders of GPU computing."}],
-  temperature=0.5,
-  top_p=1,
-  max_tokens=1024,
-  stream=True
-)
+    def get_table_schema(self, conn: sqlite3.Connection, table_name: str) -> str:
+        """Get the CREATE TABLE statement for a given table"""
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}';")
+        return cursor.fetchone()[0]
 
-for chunk in completion:
-  if chunk.choices[0].delta.content is not None:
-    print(chunk.choices[0].delta.content, end="")
+    def get_table_info(self, conn: sqlite3.Connection) -> List[Dict]:
+        """Get information about all tables in the database"""
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+        
+        table_info = []
+        for table in tables:
+            table_name = table[0]
+            cursor.execute(f"PRAGMA table_info({table_name});")
+            columns = cursor.fetchall()
+            table_info.append({
+                'name': table_name,
+                'columns': [{'name': col[1], 'type': col[2]} for col in columns]
+            })
+        return table_info
 
+    def create_warehouse_database(self) -> None:
+        """Consolidate all source databases into a single warehouse database"""
+        try:
+            # Remove existing warehouse database if it exists
+            if self.warehouse_path.exists():
+                print(f"\n🗑️ Removing existing warehouse database...")
+                self.warehouse_path.unlink()
+            
+            # Create new warehouse database
+            warehouse_conn = sqlite3.connect(self.warehouse_path)
+            
+            print("\n🏗️ Creating warehouse database...")
+            
+            # Process each source database
+            for db_name, db_file in self.source_databases.items():
+                try:
+                    source_path = self.source_path / db_file
+                    if not source_path.exists():
+                        print(f"⚠️ Source database not found: {db_file}")
+                        continue
+                        
+                    source_conn = sqlite3.connect(source_path)
+                    
+                    print(f"\n📦 Processing database: {db_name}")
+                    
+                    # Get table information
+                    tables = self.get_table_info(source_conn)
+                    
+                    # Copy each table
+                    for table in tables:
+                        table_name = table['name']
+                        new_table_name = f"{db_name}_{table_name}"
+                        
+                        try:
+                            # Get and modify schema
+                            schema = self.get_table_schema(source_conn, table_name)
+                            schema = schema.replace(table_name, new_table_name, 1)
+                            
+                            # Create table in warehouse
+                            warehouse_conn.execute(schema)
+                            
+                            # Copy data
+                            data = pd.read_sql_query(f"SELECT * FROM {table_name}", source_conn)
+                            data.to_sql(new_table_name, warehouse_conn, if_exists='replace', index=False)
+                            
+                            print(f"✅ Copied table: {new_table_name} ({len(data)} rows)")
+                            
+                        except Exception as table_error:
+                            print(f"❌ Error copying table {table_name}: {table_error}")
+                    
+                    source_conn.close()
+                    
+                except Exception as db_error:
+                    print(f"❌ Error processing database {db_name}: {db_error}")
+            
+            # Create useful views
+            self.create_warehouse_views(warehouse_conn)
+            
+            warehouse_conn.close()
+            print("\n✨ Warehouse database created successfully!")
+            
+        except Exception as e:
+            print(f"\n❌ Error creating warehouse database: {e}")
+
+    def create_warehouse_views(self, conn: sqlite3.Connection) -> None:
+        """Create useful views in the warehouse database"""
+        try:
+            print("\n🔄 Creating views for common queries...")
+            
+            views = [
+                # Crop prices with soil health data
+                """
+                CREATE VIEW IF NOT EXISTS v_crop_prices_soil AS
+                SELECT 
+                    cp.state,
+                    cp.district,
+                    cp.commodity,
+                    cp.price_per_quintal,
+                    sh.nitrogen_level,
+                    sh.phosphorus_level,
+                    sh.potassium_level
+                FROM crop_prices_transformed_prices cp
+                JOIN soil_health_transformed_soil_health sh 
+                ON cp.state = sh.state AND cp.district = sh.district
+                """,
+                
+                # Weather data with irrigation
+                """
+                CREATE VIEW IF NOT EXISTS v_weather_irrigation AS
+                SELECT 
+                    w.state,
+                    w.district,
+                    w.date,
+                    w.temperature_max,
+                    w.temperature_min,
+                    w.rainfall,
+                    i.irrigated_area
+                FROM weather_data_transformed_weather w
+                JOIN irrigation_transformed_irrigation i
+                ON w.state = i.state AND w.district = i.district
+                """,
+                
+                # Comprehensive crop data
+                """
+                CREATE VIEW IF NOT EXISTS v_crop_comprehensive AS
+                SELECT 
+                    cd.state,
+                    cd.district,
+                    cd.crop,
+                    cd.yield_value,
+                    cp.price_per_quintal,
+                    sh.nitrogen_level,
+                    w.temperature_max,
+                    w.rainfall
+                FROM crop_data_transformed_crop_data cd
+                LEFT JOIN crop_prices_transformed_prices cp 
+                    ON cd.state = cp.state AND cd.district = cp.district
+                LEFT JOIN soil_health_transformed_soil_health sh 
+                    ON cd.state = sh.state AND cd.district = sh.district
+                LEFT JOIN weather_data_transformed_weather w 
+                    ON cd.state = w.state AND cd.district = w.district
+                """
+            ]
+            
+            for view_sql in views:
+                try:
+                    conn.execute(view_sql)
+                except Exception as view_error:
+                    print(f"❌ Error creating view: {view_error}")
+            
+            conn.commit()
+            print("✅ Views created successfully")
+            
+        except Exception as e:
+            print(f"❌ Error creating views: {e}")
+
+    def get_warehouse_schema(self) -> Dict[str, List[str]]:
+        """Get the schema of the warehouse database"""
+        schemas = {}
+        try:
+            conn = sqlite3.connect(self.warehouse_path)
+            cursor = conn.cursor()
+
+            # Get all tables and views
+            cursor.execute("""
+                SELECT name, type 
+                FROM sqlite_master 
+                WHERE type IN ('table', 'view');
+            """)
+            objects = cursor.fetchall()
+
+            for obj_name, obj_type in objects:
+                cursor.execute(f"PRAGMA table_info({obj_name});")
+                columns = cursor.fetchall()
+                schemas[obj_name] = [
+                    f"{col[1]} ({col[2]})" for col in columns
+                ]
+
+            conn.close()
+            return schemas
+            
+        except sqlite3.Error as e:
+            print(f"Error loading warehouse schema: {e}")
+            return {}
+
+def main():
+    """Main function to run the database consolidation"""
+    try:
+        consolidator = DatabaseConsolidator()
+        
+        # Create the warehouse database
+        consolidator.create_warehouse_database()
+        
+        # Print schema of the created warehouse
+        print("\n📊 Warehouse Database Schema:")
+        schema = consolidator.get_warehouse_schema()
+        for table_name, columns in schema.items():
+            print(f"\n{table_name}:")
+            for column in columns:
+                print(f"  - {column}")
+                
+    except Exception as e:
+        print(f"\n❌ Fatal error: {e}")
+    
+    except KeyboardInterrupt:
+        print("\n\nProcess terminated by user.")
+
+if __name__ == "__main__":
+    main()
