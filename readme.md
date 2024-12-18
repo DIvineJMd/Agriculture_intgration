@@ -76,7 +76,6 @@ The Smart Agriculture Advisor project is an innovative system designed to empowe
 - **Kaggle**: Offers static datasets for analysis.
 - **ETL Pipeline**: Built with Python and cloud tools.
 - **NVIDIA LLaMA Model**: Implements advanced language capabilities for the chatbot.
-- **Streamlit/Django/Flask**: Frameworks used for web application development (specify the one implemented).
 
 ---
 
